@@ -1,0 +1,169 @@
+═══════════════════════════════════════════════════════════════
+  MIKKI-MONITORI v1.0 — Asennus- ja käyttöohjeet
+═══════════════════════════════════════════════════════════════
+
+MITÄ OHJELMA TEKEE
+──────────────────
+Mikki-monitori sijaitsee oikean mikrofonisi ja muiden ohjelmien
+välissä. Se kuuntelee reaaliajassa mikrofoniasi ja mykistää
+ulostulon automaattisesti, jos äänentaso nousee liikaa (esim.
+käsittelymelu, kolahdus, huuto). Kun taso palaa normaaliksi 2
+sekunnin ajaksi, ääni jatkuu automaattisesti.
+
+Ohjelma ei tallenna mitään levylle eikä lähetä dataa verkkoon.
+Äänipuskuri on noin 10 ms RAM:ssa ja häviää heti suljettaessa.
+
+
+─────────────────────────────────────────────────────────────
+  OSA 1 — ESITIETOJEN ASENTAMINEN
+─────────────────────────────────────────────────────────────
+
+VAIHE 1: Python
+───────────────
+1. Avaa selain ja mene osoitteeseen: https://python.org/downloads
+2. Lataa uusin Python 3.x (Windows installer, 64-bit)
+3. Käynnistä asennusohjelma
+   TÄRKEÄÄ: laita rasti kohtaan "Add Python to PATH" ennen
+   kuin klikkaat Install Now
+4. Asenna loppuun
+
+
+VAIHE 2: Python-kirjastot
+──────────────────────────
+1. Avaa Komentokehote (etsi "cmd" Käynnistä-valikosta)
+2. Kopioi ja liitä tämä komento, paina Enter:
+
+   pip install sounddevice numpy
+
+3. Odota että asennus valmistuu (näyttää: Successfully installed...)
+
+
+VAIHE 3: VB-Audio Virtual Cable (jos ei ole jo asennettu)
+──────────────────────────────────────────────────────────
+1. Mene osoitteeseen: https://vb-audio.com/Cable/
+2. Lataa "VBCABLE_Driver_Pack43.zip" (tai uudempi versio)
+3. Pura zip-tiedosto
+4. Klikkaa HIIREN OIKEALLA "VBCABLE_Setup_x64.exe"
+   → Valitse "Suorita järjestelmänvalvojana"
+5. Klikkaa Install Driver
+6. Käynnistä tietokone uudelleen tarvittaessa
+
+
+─────────────────────────────────────────────────────────────
+  OSA 2 — MIKKI-MONITORIN KÄYNNISTÄMINEN
+─────────────────────────────────────────────────────────────
+
+VAIHE 4: Käynnistä ohjelma
+───────────────────────────
+Vaihtoehto A — Tuplaklikkaa tiedostoa:
+  Klikkaa "mikki-monitori.py" hiiren oikealla → "Avaa" →
+  valitse Python
+
+Vaihtoehto B — Komentorivi (suositeltu):
+  1. Avaa Komentokehote
+  2. Kirjoita:  cd C:\Users\Mikael\Projects\mikki-monitori
+  3. Kirjoita:  python mikki-monitori.py
+
+
+─────────────────────────────────────────────────────────────
+  OSA 3 — VB-AUDIO -REITITYKSEN ASETTAMINEN
+─────────────────────────────────────────────────────────────
+
+VAIHE 5: Valitse laitteet ohjelmassa
+──────────────────────────────────────
+Ohjelman ylälaidassa on kaksi pudotusvalikkoa:
+
+  Sisääntulo  → Valitse OIKEA mikrofonisi
+                (esim. "Microphone (Realtek Audio)")
+
+  Ulostulo    → Valitse "CABLE Input (VB-Audio Virtual Cable)"
+                (ohjelma yrittää valita tämän automaattisesti)
+
+
+VAIHE 6: Aseta mikrofoni Discordissa / Teamsissa / OBS:ssä
+────────────────────────────────────────────────────────────
+Käy asettamassa kussakin ohjelmassa mikrofoni (input-laite)
+kohtaan:  "CABLE Output (VB-Audio Virtual Cable)"
+
+  Discord:
+    Asetukset → Voice & Video → Input Device
+    → CABLE Output (VB-Audio Virtual Cable)
+
+  Microsoft Teams:
+    Asetukset → Laitteet → Mikrofoni
+    → CABLE Output (VB-Audio Virtual Cable)
+
+  OBS:
+    Asetukset → Audio → Mic/Auxiliary Audio
+    → CABLE Output (VB-Audio Virtual Cable)
+
+  Zoom:
+    Asetukset → Audio → Mikrofoni
+    → CABLE Output (VB-Audio Virtual Cable)
+
+
+─────────────────────────────────────────────────────────────
+  OSA 4 — KÄYTTÖ
+─────────────────────────────────────────────────────────────
+
+KALIBROINTI (automaattinen)
+────────────────────────────
+Kun painat "Käynnistä monitorointi", ohjelma kalibroi
+1,5 sekunnin ajan. Pysy hiljaa kalibroinnin aikana —
+ohjelma oppii ns. normaalin ympäristön äänitason.
+
+PYSÄYTYSRAJA -SLIDER
+──────────────────────
+Säätää kuinka monta desibeliä perustason yläpuolella
+äänentason pitää olla ennen kuin ulostulo mykistetään.
+
+  +5 dB  = hyvin herkkä (pienikin kolahdus mykistää)
+  +15 dB = normaali käyttö
+  +30 dB = mykistää vain todella koviin ääniin
+  +50 dB = lähes ei vaikutusta
+
+AUTOMAATTINEN JATKAMINEN
+──────────────────────────
+Kun äänentaso laskee alle rajan, ohjelma odottaa 2
+sekuntia ja jatkaa sitten automaattisesti. Laskuri
+näkyy statusbaarissa reaaliajassa.
+
+
+─────────────────────────────────────────────────────────────
+  OSA 5 — TIETOTURVA
+─────────────────────────────────────────────────────────────
+
+• Ohjelma ei lähetä mitään verkkoon (voit ajaa palomuurin
+  takana tai täysin offline)
+• Ei kirjoita mitään levylle
+• Äänipuskuri on ~10 ms, häviää RAM:sta heti ohjelman
+  sulkeutuessa
+• Lähdekoodi on luettavissa tiedostossa mikki-monitori.py
+  — voit tarkistaa jokaisen rivin itse
+• VB-Audio Virtual Cable on kernel-tason ajuri kuten
+  kaikki äänikorttien ajurit — se ei tallenna tai lähetä
+  mitään, mutta on suljetun lähdekoodin
+
+
+─────────────────────────────────────────────────────────────
+  VIANETSINTÄ
+─────────────────────────────────────────────────────────────
+
+"ModuleNotFoundError: No module named 'sounddevice'"
+  → Aja uudelleen:  pip install sounddevice numpy
+
+Ohjelma ei kuule mikrofonia
+  → Tarkista Windows-ääniasetuksista että mikrofoni on
+    oletuslaite ja sillä on lupa (Asetukset → Tietosuoja
+    → Mikrofoni → salli sovelluksille pääsy)
+
+Ohjelmat eivät kuule ääntä
+  → Varmista että olet valinnut "CABLE Output" (ei Input)
+    mikrofoniksi Discordissa / Teamsissa jne.
+  → Varmista että Ulostulo-valikossa on "CABLE Input"
+
+Ääni kuulostaa viiveelliseltä
+  → Normaalia: ~10-20 ms viive on lisätty
+  → Tämä ei vaikuta kuulijaan, vain omaan monitorointiin
+
+═══════════════════════════════════════════════════════════════

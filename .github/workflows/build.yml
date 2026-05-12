@@ -1,0 +1,41 @@
+name: Build Windows executable
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build English executable
+        run: |
+          pyinstaller --onefile --noconsole --name mic-monitor mic-monitor-v3-eng.py
+
+      - name: Build Finnish executable
+        run: |
+          pyinstaller --onefile --noconsole --name mikki-monitori mikki-monitori-v3.py
+
+      - name: Upload English exe to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/mic-monitor.exe
+
+      - name: Upload Finnish exe to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/mikki-monitori.exe

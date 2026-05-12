@@ -1,0 +1,193 @@
+═══════════════════════════════════════════════════════════════
+  MIC MONITOR v3.0 — Installation & Usage Guide
+═══════════════════════════════════════════════════════════════
+
+WHAT IT DOES
+────────────
+Mic Monitor sits between your real microphone and other
+applications. It listens to your mic in real time and mutes
+the output automatically when the volume gets too loud (e.g.
+handling noise, bangs, shouting). Once the level drops back
+to normal for 2 seconds, audio resumes automatically.
+
+Nothing is recorded or written to disk. No data is sent over
+the network. The audio buffer is ~10 ms in RAM and disappears
+the moment the program closes.
+
+
+─────────────────────────────────────────────────────────────
+  PART 1 — PREREQUISITES
+─────────────────────────────────────────────────────────────
+
+STEP 1: Python
+──────────────
+1. Open your browser and go to: https://python.org/downloads
+2. Download the latest Python 3.x (Windows installer, 64-bit)
+3. Run the installer
+   IMPORTANT: check "Add Python to PATH" before clicking
+   Install Now — otherwise the next steps won't work
+4. Complete the installation
+
+
+STEP 2: Python libraries
+─────────────────────────
+1. Open Command Prompt (search "cmd" in the Start menu)
+2. Paste the following command and press Enter:
+
+   pip install sounddevice numpy
+
+3. Wait for it to finish (you'll see: Successfully installed...)
+
+
+STEP 3: VB-Audio Virtual Cable (if not already installed)
+──────────────────────────────────────────────────────────
+1. Go to: https://vb-audio.com/Cable/
+2. Download "VBCABLE_Driver_Pack43.zip" (or newer)
+3. Extract the zip file
+4. RIGHT-CLICK "VBCABLE_Setup_x64.exe"
+   → Select "Run as administrator"
+5. Click Install Driver
+6. Restart your computer if prompted
+
+
+─────────────────────────────────────────────────────────────
+  PART 2 — RUNNING THE PROGRAM
+─────────────────────────────────────────────────────────────
+
+STEP 4: Launch the program
+───────────────────────────
+Option A — Command line (recommended):
+  1. Open Command Prompt
+  2. Type:  cd C:\Users\Mikael\Projects\mikki-monitori
+  3. Type:  python mic-monitor-v3-eng.py
+
+Option B — Double-click:
+  Right-click "mic-monitor-v3-eng.py" → Open with → Python
+
+
+─────────────────────────────────────────────────────────────
+  PART 3 — VB-AUDIO ROUTING
+─────────────────────────────────────────────────────────────
+
+STEP 5: Select devices in the program
+───────────────────────────────────────
+The top of the window has two dropdowns:
+
+  🎤 Input   → Select YOUR real microphone
+               (e.g. "Microphone (Realtek Audio)")
+
+  🔊 Output  → Select "CABLE Input (VB-Audio Virtual Cable)"
+               (the program tries to auto-select this)
+
+
+STEP 6: Set the microphone in Discord / Teams / OBS / Zoom
+────────────────────────────────────────────────────────────
+In each app, change the microphone (input device) to:
+  "CABLE Output (VB-Audio Virtual Cable)"
+
+  Discord:
+    Settings → Voice & Video → Input Device
+    → CABLE Output (VB-Audio Virtual Cable)
+
+  Microsoft Teams:
+    Settings → Devices → Microphone
+    → CABLE Output (VB-Audio Virtual Cable)
+
+  OBS:
+    Settings → Audio → Mic/Auxiliary Audio
+    → CABLE Output (VB-Audio Virtual Cable)
+
+  Zoom:
+    Settings → Audio → Microphone
+    → CABLE Output (VB-Audio Virtual Cable)
+
+
+─────────────────────────────────────────────────────────────
+  PART 4 — HOW TO USE IT
+─────────────────────────────────────────────────────────────
+
+CALIBRATION (automatic)
+────────────────────────
+When you press "Start monitoring", the program calibrates for
+1.5 seconds. Stay quiet during this time — it learns your
+normal background noise level (shown as a blue dashed line
+on the meter after calibration).
+
+The baseline adapts continuously while monitoring: it slowly
+drifts to follow your ambient noise level, but only during
+quiet moments — loud sounds never affect the baseline.
+
+MUTE THRESHOLD SLIDER
+──────────────────────
+Sets the level (0–100 %) at which the output is muted.
+The red line on the meter shows exactly where the threshold
+is. Adjust until the red line sits clearly above your normal
+speaking level.
+
+  Low value  (e.g. 30 %) = very sensitive — mutes easily
+  Mid value  (e.g. 60 %) = typical use
+  High value (e.g. 85 %) = only mutes very loud sounds
+
+Tip: calibrate first, then set the threshold so the red line
+is well above the blue baseline line.
+
+AUTO-RESUME
+────────────
+When the level drops back below the threshold, the program
+waits 2 seconds and then resumes automatically. The header
+shows a live countdown: "Muted — resuming in 1.4 s".
+
+WHAT THE COLORS MEAN
+─────────────────────
+  ● Gray dot    — stopped
+  ● Blue dot    — calibrating
+  ● Green dot   — monitoring active, audio passing through
+  ● Yellow dot  — output muted, waiting to resume
+
+  Blue dashed line on meter  — your calibrated baseline
+  Red solid line on meter    — your mute threshold
+
+
+─────────────────────────────────────────────────────────────
+  PART 5 — SECURITY
+─────────────────────────────────────────────────────────────
+
+• No network connections — safe to run behind a firewall
+  or completely offline
+• Nothing is written to disk
+• Audio buffer is ~10 ms in RAM, cleared when the program
+  closes — no audio is ever retained
+• Full source code is readable in mic-monitor-v3-eng.py
+  — you can verify every line yourself
+• VB-Audio Virtual Cable is a kernel-level audio driver,
+  like any sound card driver — it does not record or
+  transmit audio, but it is closed-source
+
+
+─────────────────────────────────────────────────────────────
+  TROUBLESHOOTING
+─────────────────────────────────────────────────────────────
+
+"ModuleNotFoundError: No module named 'sounddevice'"
+  → Run:  pip install sounddevice numpy
+
+Program doesn't hear the microphone
+  → Check Windows sound settings: make sure the mic is
+    enabled and has permission
+    Settings → Privacy → Microphone → Allow apps to access
+
+Other apps can't hear audio
+  → Make sure you selected "CABLE Output" (not Input)
+    as the microphone in Discord / Teams / etc.
+  → Make sure the Output dropdown in the program shows
+    "CABLE Input (VB-Audio Virtual Cable)"
+
+Audio sounds slightly delayed
+  → Normal: ~10–20 ms latency is added by the processing
+  → The delay is on your end only — listeners are unaffected
+
+Threshold triggers too easily / not enough
+  → Re-run calibration (stop and start again) in a quiet
+    environment, then adjust the slider
+
+═══════════════════════════════════════════════════════════════

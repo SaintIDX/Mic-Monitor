@@ -15,6 +15,8 @@ Requirements:  pip install sounddevice numpy pystray pillow pycaw comtypes
 """
 
 import threading, time, math, json, os, sys
+import tkinter as tk
+from tkinter import ttk
 
 try:
     import sounddevice as sd
@@ -43,7 +45,7 @@ BLOCK_SIZE           = 512
 CHANNELS             = 1
 DBFS_FLOOR           = -60.0
 CAL_DURATION         = 2.0
-RECOVERY_SEC         = 2.0
+DEFAULT_RECOVERY_SEC = 2.0
 DETECT_ALPHA         = 0.30
 BASELINE_ALPHA       = 0.003
 BASELINE_QUIET_RATIO = 0.65
@@ -51,13 +53,22 @@ WATCHDOG_INTERVAL    = 3.0
 
 IDLE='idle'; CALIBRATING='calibrating'; MONITORING='monitoring'; TRIGGERED='triggered'
 
-THRESHOLD_PRESETS = [
+DEFAULT_PRESETS = [
     ('Low  —  40 %',       40),
     ('Medium  —  60 %',    60),
     ('Normal  —  70 %',    70),
     ('High  —  85 %',      85),
     ('Very high  —  95 %', 95),
 ]
+
+# ── Dark palette ──────────────────────────────────────────────────────────────
+BG  = '#0d1117'
+BG2 = '#161b22'
+BG3 = '#21262d'
+FG  = '#e6edf3'
+FG2 = '#8b949e'
+ACC = '#58a6ff'
+SEP = '#30363d'
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def dbfs_to_pct(dbfs: float) -> float:
@@ -112,11 +123,148 @@ class MicController:
             return False
 
     def restore(self):
-        """Restore the mute state that was set before the program started."""
+        """Restore the mute state that was active before the program started."""
         try:
             self._vol.SetMute(1 if self._original_mute else 0, None)
         except Exception:
             pass
+
+# ── Settings window ───────────────────────────────────────────────────────────
+class SettingsWindow:
+    """Small tkinter window for editing presets and monitoring settings."""
+
+    def __init__(self, monitor):
+        self._mon = monitor
+        self._win = tk.Toplevel(monitor._root)
+        self._build()
+
+    def _build(self):
+        win = self._win
+        win.title('Mic Monitor No-VB — Settings')
+        win.configure(bg=BG)
+        win.resizable(False, False)
+        win.attributes('-topmost', True)
+        win.grab_set()  # modal
+
+        # ── Header ────────────────────────────────────────────────────────────
+        tk.Label(win, text='THRESHOLD PRESETS',
+                 bg=BG, fg=FG2, font=('Segoe UI', 8, 'bold')
+                 ).grid(row=0, column=0, columnspan=3,
+                        sticky='w', padx=16, pady=(16, 4))
+
+        tk.Label(win, text='Label', bg=BG, fg=FG2,
+                 font=('Segoe UI', 8)).grid(row=1, column=0, padx=(16, 4), sticky='w')
+        tk.Label(win, text='%', bg=BG, fg=FG2,
+                 font=('Segoe UI', 8)).grid(row=1, column=1, padx=4, sticky='w')
+
+        # ── Preset rows ───────────────────────────────────────────────────────
+        self._label_vars = []
+        self._value_vars = []
+
+        for i, (label, value) in enumerate(self._mon._presets):
+            lvar = tk.StringVar(value=label)
+            vvar = tk.StringVar(value=str(value))
+
+            e_lbl = tk.Entry(win, textvariable=lvar, width=24,
+                             bg=BG2, fg=FG, insertbackground=FG,
+                             relief='flat', font=('Segoe UI', 9),
+                             highlightthickness=1, highlightbackground=SEP,
+                             highlightcolor=ACC)
+            e_lbl.grid(row=i + 2, column=0, padx=(16, 4), pady=3, sticky='w')
+
+            e_val = tk.Spinbox(win, textvariable=vvar,
+                               from_=1, to=100, width=5,
+                               bg=BG2, fg=FG, insertbackground=FG,
+                               buttonbackground=BG3, relief='flat',
+                               font=('Segoe UI', 9),
+                               highlightthickness=1, highlightbackground=SEP,
+                               highlightcolor=ACC)
+            e_val.grid(row=i + 2, column=1, padx=4, pady=3, sticky='w')
+
+            tk.Label(win, text='%', bg=BG, fg=FG2,
+                     font=('Segoe UI', 9)).grid(row=i + 2, column=2,
+                                                padx=(0, 16), sticky='w')
+            self._label_vars.append(lvar)
+            self._value_vars.append(vvar)
+
+        # ── Separator ─────────────────────────────────────────────────────────
+        sep_row = len(self._mon._presets) + 2
+        tk.Frame(win, bg=SEP, height=1).grid(
+            row=sep_row, column=0, columnspan=3,
+            sticky='ew', padx=16, pady=(8, 4))
+
+        # ── Recovery time ─────────────────────────────────────────────────────
+        tk.Label(win, text='MONITORING',
+                 bg=BG, fg=FG2, font=('Segoe UI', 8, 'bold')
+                 ).grid(row=sep_row + 1, column=0, columnspan=3,
+                        sticky='w', padx=16, pady=(4, 4))
+
+        tk.Label(win, text='Recovery time', bg=BG, fg=FG,
+                 font=('Segoe UI', 9)
+                 ).grid(row=sep_row + 2, column=0, padx=(16, 4),
+                        pady=4, sticky='w')
+
+        self._rec_var = tk.StringVar(value=f'{self._mon._recovery_sec:.1f}')
+        rec_spin = tk.Spinbox(win, textvariable=self._rec_var,
+                              from_=0.5, to=10.0, increment=0.5, width=5,
+                              bg=BG2, fg=FG, insertbackground=FG,
+                              buttonbackground=BG3, relief='flat',
+                              font=('Segoe UI', 9), format='%.1f',
+                              highlightthickness=1, highlightbackground=SEP,
+                              highlightcolor=ACC)
+        rec_spin.grid(row=sep_row + 2, column=1, padx=4, pady=4, sticky='w')
+        tk.Label(win, text='s', bg=BG, fg=FG2,
+                 font=('Segoe UI', 9)).grid(row=sep_row + 2, column=2, sticky='w')
+
+        # ── Separator ─────────────────────────────────────────────────────────
+        tk.Frame(win, bg=SEP, height=1).grid(
+            row=sep_row + 3, column=0, columnspan=3,
+            sticky='ew', padx=16, pady=(8, 4))
+
+        # ── Buttons ───────────────────────────────────────────────────────────
+        btn = tk.Frame(win, bg=BG)
+        btn.grid(row=sep_row + 4, column=0, columnspan=3, pady=(4, 16))
+
+        tk.Button(btn, text='Save', command=self._save,
+                  bg=ACC, fg='#0d1117', font=('Segoe UI', 9, 'bold'),
+                  relief='flat', padx=20, pady=6,
+                  cursor='hand2', activebackground='#79c0ff'
+                  ).pack(side='left', padx=(16, 6))
+
+        tk.Button(btn, text='Cancel', command=win.destroy,
+                  bg=BG3, fg=FG, font=('Segoe UI', 9),
+                  relief='flat', padx=20, pady=6,
+                  cursor='hand2', activebackground=BG2
+                  ).pack(side='left', padx=(0, 16))
+
+        # Center on screen
+        win.update_idletasks()
+        w = win.winfo_reqwidth()
+        h = win.winfo_reqheight()
+        sx = (win.winfo_screenwidth()  - w) // 2
+        sy = (win.winfo_screenheight() - h) // 2
+        win.geometry(f'+{sx}+{sy}')
+
+    def _save(self):
+        presets = []
+        for i, (lvar, vvar) in enumerate(zip(self._label_vars, self._value_vars)):
+            label = lvar.get().strip() or f'Preset {i + 1}'
+            try:
+                value = max(1, min(100, int(float(vvar.get()))))
+            except Exception:
+                value = 70
+            presets.append((label, value))
+
+        try:
+            rec = max(0.5, min(10.0, float(self._rec_var.get())))
+        except Exception:
+            rec = DEFAULT_RECOVERY_SEC
+
+        self._mon._presets      = presets
+        self._mon._recovery_sec = rec
+        self._mon._save_settings()
+        self._mon._rebuild_menu()
+        self._win.destroy()
 
 # ── Monitor ───────────────────────────────────────────────────────────────────
 class NoVBMonitor:
@@ -137,32 +285,54 @@ class NoVBMonitor:
         self.in_idx  = None
         self.in_name = ''
 
-        self._icon       = None
-        self._prev_state = None
-        self._mic_ctrl   = MicController()
+        self._icon            = None
+        self._prev_state      = None
+        self._mic_ctrl        = MicController()
+        self._root            = None       # tkinter root (main thread)
+        self._pending_settings = False     # flag: open settings window
 
     # ── Settings ──────────────────────────────────────────────────────────────
     def _load_settings(self):
         self._threshold          = 70
         self._start_with_windows = False
         self._notifications      = True
+        self._recovery_sec       = DEFAULT_RECOVERY_SEC
+        self._presets            = list(DEFAULT_PRESETS)
         try:
             with open(SETTINGS_PATH) as f:
                 raw = json.load(f)
-            self._threshold          = max(1, min(100, int(raw.get('threshold', 70))))
+            self._threshold = max(1, min(100, int(raw.get('threshold', 70))))
             self._start_with_windows = bool(raw.get('start_with_windows', False))
             self._notifications      = bool(raw.get('notifications', True))
+            self._recovery_sec = max(0.5, min(10.0,
+                                   float(raw.get('recovery_sec', DEFAULT_RECOVERY_SEC))))
+            raw_p = raw.get('presets', [])
+            if isinstance(raw_p, list) and len(raw_p) == 5:
+                self._presets = [
+                    (str(p[0]), max(1, min(100, int(p[1])))) for p in raw_p
+                ]
         except Exception:
             pass
 
     def _save_settings(self):
         try:
             with open(SETTINGS_PATH, 'w') as f:
-                json.dump({'threshold':          self._threshold,
-                           'start_with_windows': self._start_with_windows,
-                           'notifications':      self._notifications}, f)
+                json.dump({
+                    'threshold':          self._threshold,
+                    'start_with_windows': self._start_with_windows,
+                    'notifications':      self._notifications,
+                    'recovery_sec':       self._recovery_sec,
+                    'presets':            self._presets,
+                }, f, indent=2)
         except Exception:
             pass
+
+    def _rebuild_menu(self):
+        if self._icon:
+            try:
+                self._icon.menu = self._build_menu()
+            except Exception:
+                pass
 
     # ── Windows autostart ─────────────────────────────────────────────────────
     def _autostart_cmd(self) -> str:
@@ -186,6 +356,46 @@ class NoVBMonitor:
             return True
         except Exception:
             return False
+
+    # ── Toast notification ────────────────────────────────────────────────────
+    def _show_toast(self, message: str):
+        """Small overlay popup in the bottom-right corner (3 s auto-dismiss)."""
+        if not self._notifications or self._root is None:
+            return
+        try:
+            toast = tk.Toplevel(self._root)
+            toast.overrideredirect(True)
+            toast.attributes('-topmost', True)
+            toast.attributes('-alpha', 0.93)
+            w, h = 290, 68
+            sw   = toast.winfo_screenwidth()
+            sh   = toast.winfo_screenheight()
+            toast.geometry(f'{w}x{h}+{sw - w - 20}+{sh - h - 60}')
+            toast.configure(bg=BG2)
+
+            tk.Frame(toast, bg=ACC, width=4).pack(side='left', fill='y')
+            body = tk.Frame(toast, bg=BG2)
+            body.pack(side='left', fill='both', expand=True, padx=10)
+
+            tk.Label(body, text='🎙  Mic Monitor No-VB',
+                     bg=BG2, fg=ACC,
+                     font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(10, 1))
+            tk.Label(body, text=message,
+                     bg=BG2, fg=FG,
+                     font=('Segoe UI', 9)).pack(anchor='w')
+
+            toast.after(3000, toast.destroy)
+        except Exception:
+            pass
+
+    def _notify(self, message: str):
+        """Schedule a toast on the main (tkinter) thread."""
+        if not self._notifications or self._root is None:
+            return
+        try:
+            self._root.after(0, lambda: self._show_toast(message))
+        except Exception:
+            pass
 
     # ── Tray helpers ──────────────────────────────────────────────────────────
     def _status_text(self) -> str:
@@ -213,13 +423,6 @@ class NoVBMonitor:
         except Exception:
             pass
 
-    def _notify(self, message: str):
-        if not self._notifications or not self._icon: return
-        try:
-            self._icon.notify(message, 'Mic Monitor No-VB')
-        except Exception:
-            pass
-
     # ── Tray menu ─────────────────────────────────────────────────────────────
     def _build_menu(self) -> pystray.Menu:
 
@@ -231,10 +434,13 @@ class NoVBMonitor:
             return action
 
         threshold_items = [
-            pystray.MenuItem(label, threshold_action(value),
+            pystray.MenuItem(
+                label,
+                threshold_action(value),
                 checked=lambda item, v=value: self._threshold == v,
-                radio=True)
-            for label, value in THRESHOLD_PRESETS
+                radio=True,
+            )
+            for label, value in self._presets
         ]
 
         def toggle_autostart(icon, item):
@@ -246,6 +452,9 @@ class NoVBMonitor:
         def toggle_notif(icon, item):
             self._notifications = not self._notifications
             self._save_settings()
+
+        def open_settings(icon, item):
+            self._pending_settings = True
 
         return pystray.Menu(
             pystray.MenuItem(
@@ -261,6 +470,8 @@ class NoVBMonitor:
             pystray.MenuItem('Threshold', pystray.Menu(*threshold_items)),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('Recalibrate', self._tray_recalibrate),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem('Settings…', open_settings),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('Start with Windows',
                 toggle_autostart,
@@ -289,15 +500,11 @@ class NoVBMonitor:
         if self._icon:
             self._icon.stop()
 
-    # ── Audio callback  (input only — no output stream) ───────────────────────
+    # ── Audio callback  (input only) ──────────────────────────────────────────
     def _input_cb(self, indata, frames, time_info, status):
         rms  = float(np.sqrt(np.mean(indata ** 2)))
         dbfs = 20.0 * math.log10(rms) if rms > 1e-9 else -100.0
         raw  = dbfs_to_pct(dbfs)
-
-        # Note: when mic is muted via pycaw, indata will be near zero.
-        # Detection therefore uses raw audio only in CALIBRATING / MONITORING.
-        # TRIGGERED state uses time-based recovery instead of level detection.
 
         self._detect_pct = DETECT_ALPHA * raw + (1 - DETECT_ALPHA) * self._detect_pct
         now = time.perf_counter()
@@ -319,12 +526,12 @@ class NoVBMonitor:
             if self._detect_pct >= t:
                 self._mic_ctrl.set_mute(True)
                 self.state          = TRIGGERED
-                self.recovery_start = now   # start timer immediately
+                self.recovery_start = now
 
         elif self.state == TRIGGERED:
-            # Time-based recovery: wait RECOVERY_SEC, then unmute.
-            # If noise is still happening, MONITORING will re-trigger on next block.
-            if now - self.recovery_start >= RECOVERY_SEC:
+            # Time-based recovery — level-based won't work because SetMute
+            # zeros our own InputStream readings.
+            if now - self.recovery_start >= self._recovery_sec:
                 self._mic_ctrl.set_mute(False)
                 self.state          = MONITORING
                 self.recovery_start = None
@@ -397,7 +604,27 @@ class NoVBMonitor:
             f'Mic Monitor No-VB  —  {self._status_text()}',
             menu=self._build_menu(),
         )
-        self._icon.run()
+        self._icon.run_detached()
+
+        # Main thread: tkinter hidden root for toasts and settings window
+        self._root = tk.Tk()
+        self._root.withdraw()
+        self._root.configure(bg=BG)
+
+        try:
+            while self._running:
+                if self._pending_settings:
+                    self._pending_settings = False
+                    SettingsWindow(self)
+                self._root.update()
+                time.sleep(0.05)
+        except tk.TclError:
+            pass
+        finally:
+            try:
+                self._root.destroy()
+            except Exception:
+                pass
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

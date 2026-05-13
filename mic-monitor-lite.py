@@ -10,7 +10,7 @@ Nothing is recorded. No network connections.
 """
 
 import threading, time, math, json, os, sys
-from datetime import datetime
+import tkinter as tk
 
 try:
     import sounddevice as sd
@@ -32,23 +32,31 @@ SAMPLE_RATE          = 48000
 BLOCK_SIZE           = 512
 CHANNELS             = 1
 DBFS_FLOOR           = -60.0
-CAL_DURATION         = 2.0        # seconds of quiet needed for calibration
-RECOVERY_SEC         = 2.0        # seconds below threshold before resuming
-DETECT_ALPHA         = 0.30       # fast EMA for triggering
-BASELINE_ALPHA       = 0.003      # slow EMA for adaptive baseline
+CAL_DURATION         = 2.0
+DEFAULT_RECOVERY_SEC = 2.0
+DETECT_ALPHA         = 0.30
+BASELINE_ALPHA       = 0.003
 BASELINE_QUIET_RATIO = 0.65
-WATCHDOG_INTERVAL    = 3.0        # seconds between stream health checks
+WATCHDOG_INTERVAL    = 3.0
 
 IDLE='idle'; CALIBRATING='calibrating'; MONITORING='monitoring'; TRIGGERED='triggered'
 
-# Threshold presets shown in tray menu
-THRESHOLD_PRESETS = [
+DEFAULT_PRESETS = [
     ('Low  —  40 %',       40),
     ('Medium  —  60 %',    60),
     ('Normal  —  70 %',    70),
     ('High  —  85 %',      85),
     ('Very high  —  95 %', 95),
 ]
+
+# ── Dark palette ──────────────────────────────────────────────────────────────
+BG  = '#0d1117'
+BG2 = '#161b22'
+BG3 = '#21262d'
+FG  = '#e6edf3'
+FG2 = '#8b949e'
+ACC = '#58a6ff'
+SEP = '#30363d'
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def dbfs_to_pct(dbfs: float) -> float:
@@ -80,19 +88,156 @@ def auto_select_devices():
             continue
         if d['max_input_channels'] > 0:
             if in_idx is None:
-                in_idx = i; in_name = n               # first available
+                in_idx = i; in_name = n
             if default_in_name and default_in_name in n:
-                in_idx = i; in_name = n               # prefer system default
+                in_idx = i; in_name = n
         if d['max_output_channels'] > 0:
             if any(k in nl for k in ('cable input', 'vb-audio virtual cable')):
-                out_idx = i; out_name = n             # prefer CABLE Input
+                out_idx = i; out_name = n
 
-    if out_idx is None:                               # fallback: first output
+    if out_idx is None:
         for i, d in enumerate(sd.query_devices()):
             if d['max_output_channels'] > 0 and 'sound mapper' not in d['name'].lower():
                 out_idx = i; out_name = d['name']; break
 
     return in_idx, out_idx, in_name, out_name
+
+# ── Settings window ───────────────────────────────────────────────────────────
+class SettingsWindow:
+    """Small tkinter window for editing presets and monitoring settings."""
+
+    def __init__(self, monitor):
+        self._mon = monitor
+        self._win = tk.Toplevel(monitor._root)
+        self._build()
+
+    def _build(self):
+        win = self._win
+        win.title('Mic Monitor Lite — Settings')
+        win.configure(bg=BG)
+        win.resizable(False, False)
+        win.attributes('-topmost', True)
+        win.grab_set()
+
+        # ── Header ────────────────────────────────────────────────────────────
+        tk.Label(win, text='THRESHOLD PRESETS',
+                 bg=BG, fg=FG2, font=('Segoe UI', 8, 'bold')
+                 ).grid(row=0, column=0, columnspan=3,
+                        sticky='w', padx=16, pady=(16, 4))
+
+        tk.Label(win, text='Label', bg=BG, fg=FG2,
+                 font=('Segoe UI', 8)).grid(row=1, column=0, padx=(16, 4), sticky='w')
+        tk.Label(win, text='%', bg=BG, fg=FG2,
+                 font=('Segoe UI', 8)).grid(row=1, column=1, padx=4, sticky='w')
+
+        # ── Preset rows ───────────────────────────────────────────────────────
+        self._label_vars = []
+        self._value_vars = []
+
+        for i, (label, value) in enumerate(self._mon._presets):
+            lvar = tk.StringVar(value=label)
+            vvar = tk.StringVar(value=str(value))
+
+            e_lbl = tk.Entry(win, textvariable=lvar, width=24,
+                             bg=BG2, fg=FG, insertbackground=FG,
+                             relief='flat', font=('Segoe UI', 9),
+                             highlightthickness=1, highlightbackground=SEP,
+                             highlightcolor=ACC)
+            e_lbl.grid(row=i + 2, column=0, padx=(16, 4), pady=3, sticky='w')
+
+            e_val = tk.Spinbox(win, textvariable=vvar,
+                               from_=1, to=100, width=5,
+                               bg=BG2, fg=FG, insertbackground=FG,
+                               buttonbackground=BG3, relief='flat',
+                               font=('Segoe UI', 9),
+                               highlightthickness=1, highlightbackground=SEP,
+                               highlightcolor=ACC)
+            e_val.grid(row=i + 2, column=1, padx=4, pady=3, sticky='w')
+
+            tk.Label(win, text='%', bg=BG, fg=FG2,
+                     font=('Segoe UI', 9)).grid(row=i + 2, column=2,
+                                                padx=(0, 16), sticky='w')
+            self._label_vars.append(lvar)
+            self._value_vars.append(vvar)
+
+        # ── Separator ─────────────────────────────────────────────────────────
+        sep_row = len(self._mon._presets) + 2
+        tk.Frame(win, bg=SEP, height=1).grid(
+            row=sep_row, column=0, columnspan=3,
+            sticky='ew', padx=16, pady=(8, 4))
+
+        # ── Recovery time ─────────────────────────────────────────────────────
+        tk.Label(win, text='MONITORING',
+                 bg=BG, fg=FG2, font=('Segoe UI', 8, 'bold')
+                 ).grid(row=sep_row + 1, column=0, columnspan=3,
+                        sticky='w', padx=16, pady=(4, 4))
+
+        tk.Label(win, text='Recovery time', bg=BG, fg=FG,
+                 font=('Segoe UI', 9)
+                 ).grid(row=sep_row + 2, column=0, padx=(16, 4),
+                        pady=4, sticky='w')
+
+        self._rec_var = tk.StringVar(value=f'{self._mon._recovery_sec:.1f}')
+        rec_spin = tk.Spinbox(win, textvariable=self._rec_var,
+                              from_=0.5, to=10.0, increment=0.5, width=5,
+                              bg=BG2, fg=FG, insertbackground=FG,
+                              buttonbackground=BG3, relief='flat',
+                              font=('Segoe UI', 9), format='%.1f',
+                              highlightthickness=1, highlightbackground=SEP,
+                              highlightcolor=ACC)
+        rec_spin.grid(row=sep_row + 2, column=1, padx=4, pady=4, sticky='w')
+        tk.Label(win, text='s', bg=BG, fg=FG2,
+                 font=('Segoe UI', 9)).grid(row=sep_row + 2, column=2, sticky='w')
+
+        # ── Separator ─────────────────────────────────────────────────────────
+        tk.Frame(win, bg=SEP, height=1).grid(
+            row=sep_row + 3, column=0, columnspan=3,
+            sticky='ew', padx=16, pady=(8, 4))
+
+        # ── Buttons ───────────────────────────────────────────────────────────
+        btn = tk.Frame(win, bg=BG)
+        btn.grid(row=sep_row + 4, column=0, columnspan=3, pady=(4, 16))
+
+        tk.Button(btn, text='Save', command=self._save,
+                  bg=ACC, fg='#0d1117', font=('Segoe UI', 9, 'bold'),
+                  relief='flat', padx=20, pady=6,
+                  cursor='hand2', activebackground='#79c0ff'
+                  ).pack(side='left', padx=(16, 6))
+
+        tk.Button(btn, text='Cancel', command=win.destroy,
+                  bg=BG3, fg=FG, font=('Segoe UI', 9),
+                  relief='flat', padx=20, pady=6,
+                  cursor='hand2', activebackground=BG2
+                  ).pack(side='left', padx=(0, 16))
+
+        # Center on screen
+        win.update_idletasks()
+        w = win.winfo_reqwidth()
+        h = win.winfo_reqheight()
+        sx = (win.winfo_screenwidth()  - w) // 2
+        sy = (win.winfo_screenheight() - h) // 2
+        win.geometry(f'+{sx}+{sy}')
+
+    def _save(self):
+        presets = []
+        for i, (lvar, vvar) in enumerate(zip(self._label_vars, self._value_vars)):
+            label = lvar.get().strip() or f'Preset {i + 1}'
+            try:
+                value = max(1, min(100, int(float(vvar.get()))))
+            except Exception:
+                value = 70
+            presets.append((label, value))
+
+        try:
+            rec = max(0.5, min(10.0, float(self._rec_var.get())))
+        except Exception:
+            rec = DEFAULT_RECOVERY_SEC
+
+        self._mon._presets      = presets
+        self._mon._recovery_sec = rec
+        self._mon._save_settings()
+        self._mon._rebuild_menu()
+        self._win.destroy()
 
 # ── Core ──────────────────────────────────────────────────────────────────────
 class LiteMonitor:
@@ -113,20 +258,31 @@ class LiteMonitor:
         self.in_idx = self.out_idx = None
         self.in_name = self.out_name = ''
 
-        self._icon      = None
-        self._prev_state = None     # for change-detection in refresh loop
+        self._icon             = None
+        self._prev_state       = None
+        self._root             = None
+        self._pending_settings = False
 
     # ── Settings ──────────────────────────────────────────────────────────────
     def _load_settings(self):
         self._threshold          = 70
         self._start_with_windows = False
         self._notifications      = True
+        self._recovery_sec       = DEFAULT_RECOVERY_SEC
+        self._presets            = list(DEFAULT_PRESETS)
         try:
             with open(SETTINGS_PATH) as f:
                 raw = json.load(f)
-            self._threshold          = max(1, min(100, int(raw.get('threshold', 70))))
+            self._threshold = max(1, min(100, int(raw.get('threshold', 70))))
             self._start_with_windows = bool(raw.get('start_with_windows', False))
             self._notifications      = bool(raw.get('notifications', True))
+            self._recovery_sec = max(0.5, min(10.0,
+                                   float(raw.get('recovery_sec', DEFAULT_RECOVERY_SEC))))
+            raw_p = raw.get('presets', [])
+            if isinstance(raw_p, list) and len(raw_p) == 5:
+                self._presets = [
+                    (str(p[0]), max(1, min(100, int(p[1])))) for p in raw_p
+                ]
         except Exception:
             pass
 
@@ -137,9 +293,18 @@ class LiteMonitor:
                     'threshold':          self._threshold,
                     'start_with_windows': self._start_with_windows,
                     'notifications':      self._notifications,
-                }, f)
+                    'recovery_sec':       self._recovery_sec,
+                    'presets':            self._presets,
+                }, f, indent=2)
         except Exception:
             pass
+
+    def _rebuild_menu(self):
+        if self._icon:
+            try:
+                self._icon.menu = self._build_menu()
+            except Exception:
+                pass
 
     # ── Windows autostart ─────────────────────────────────────────────────────
     def _autostart_cmd(self) -> str:
@@ -165,6 +330,46 @@ class LiteMonitor:
         except Exception:
             return False
 
+    # ── Toast notification ────────────────────────────────────────────────────
+    def _show_toast(self, message: str):
+        """Small overlay popup in the bottom-right corner (3 s auto-dismiss)."""
+        if not self._notifications or self._root is None:
+            return
+        try:
+            toast = tk.Toplevel(self._root)
+            toast.overrideredirect(True)
+            toast.attributes('-topmost', True)
+            toast.attributes('-alpha', 0.93)
+            w, h = 290, 68
+            sw   = toast.winfo_screenwidth()
+            sh   = toast.winfo_screenheight()
+            toast.geometry(f'{w}x{h}+{sw - w - 20}+{sh - h - 60}')
+            toast.configure(bg=BG2)
+
+            tk.Frame(toast, bg=ACC, width=4).pack(side='left', fill='y')
+            body = tk.Frame(toast, bg=BG2)
+            body.pack(side='left', fill='both', expand=True, padx=10)
+
+            tk.Label(body, text='🎙  Mic Monitor Lite',
+                     bg=BG2, fg=ACC,
+                     font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(10, 1))
+            tk.Label(body, text=message,
+                     bg=BG2, fg=FG,
+                     font=('Segoe UI', 9)).pack(anchor='w')
+
+            toast.after(3000, toast.destroy)
+        except Exception:
+            pass
+
+    def _notify(self, message: str):
+        """Schedule a toast on the main (tkinter) thread."""
+        if not self._notifications or self._root is None:
+            return
+        try:
+            self._root.after(0, lambda: self._show_toast(message))
+        except Exception:
+            pass
+
     # ── Tray icon helpers ─────────────────────────────────────────────────────
     def _status_text(self) -> str:
         if self.state == CALIBRATING: return 'Calibrating…'
@@ -173,10 +378,10 @@ class LiteMonitor:
         return 'Stopped'
 
     def _icon_color(self) -> tuple:
-        if self.state == MONITORING:  return (63,  185,  80, 255)   # green
-        if self.state == TRIGGERED:   return (210, 153,  34, 255)   # yellow
-        if self.state == CALIBRATING: return (88,  166, 255, 255)   # blue
-        return                               (72,   79,  88, 255)   # gray
+        if self.state == MONITORING:  return (63,  185,  80, 255)
+        if self.state == TRIGGERED:   return (210, 153,  34, 255)
+        if self.state == CALIBRATING: return (88,  166, 255, 255)
+        return                               (72,   79,  88, 255)
 
     def _make_image(self) -> Image.Image:
         img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
@@ -184,7 +389,6 @@ class LiteMonitor:
         return img
 
     def _refresh_icon(self):
-        """Update tray icon image and tooltip. Safe to call from any thread."""
         if self._icon is None:
             return
         try:
@@ -203,19 +407,14 @@ class LiteMonitor:
                 self._refresh_icon()
             return action
 
-        def threshold_checked(value):
-            def check(item):
-                return self._threshold == value
-            return check
-
         threshold_items = [
             pystray.MenuItem(
                 label,
                 threshold_action(value),
-                checked=threshold_checked(value),
+                checked=lambda item, v=value: self._threshold == v,
                 radio=True,
             )
-            for label, value in THRESHOLD_PRESETS
+            for label, value in self._presets
         ]
 
         def toggle_autostart(icon, item):
@@ -225,18 +424,14 @@ class LiteMonitor:
                 self._start_with_windows = False
             self._save_settings()
 
-        def autostart_checked(item):
-            return self._start_with_windows
-
         def toggle_notif(icon, item):
             self._notifications = not self._notifications
             self._save_settings()
 
-        def notif_checked(item):
-            return self._notifications
+        def open_settings(icon, item):
+            self._pending_settings = True
 
         return pystray.Menu(
-            # Live status (text rebuilt on each menu open via lambda)
             pystray.MenuItem(
                 lambda item: f'🎙  {self._status_text()}',
                 None, enabled=False),
@@ -251,24 +446,19 @@ class LiteMonitor:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('Recalibrate', self._tray_recalibrate),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem('Settings…', open_settings),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem('Start with Windows',
-                toggle_autostart, checked=autostart_checked),
-            pystray.MenuItem('Notifications when muted',
-                toggle_notif, checked=notif_checked),
+                toggle_autostart,
+                checked=lambda item: self._start_with_windows),
+            pystray.MenuItem('Notifications',
+                toggle_notif,
+                checked=lambda item: self._notifications),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('Quit', self._tray_quit),
         )
 
     # ── Tray actions ──────────────────────────────────────────────────────────
-    def _notify(self, message: str):
-        """Send a balloon notification from the tray icon."""
-        if not self._notifications or self._icon is None:
-            return
-        try:
-            self._icon.notify(message, 'Mic Monitor Lite')
-        except Exception:
-            pass
-
     def _tray_recalibrate(self, icon=None, item=None):
         if self.state in (MONITORING, TRIGGERED):
             self.cal_samples.clear()
@@ -293,7 +483,7 @@ class LiteMonitor:
         t   = self._threshold
 
         if self.state == CALIBRATING:
-            if len(self.cal_samples) < 500:       # hard cap
+            if len(self.cal_samples) < 500:
                 self.cal_samples.append(raw)
             outdata[:] = indata
             if now - self.cal_start >= CAL_DURATION:
@@ -303,7 +493,7 @@ class LiteMonitor:
 
         elif self.state == MONITORING:
             if self._detect_pct < t * BASELINE_QUIET_RATIO:
-                with self._lock:                  # protect read-modify-write
+                with self._lock:
                     self.baseline_pct = (BASELINE_ALPHA * raw
                                          + (1 - BASELINE_ALPHA) * self.baseline_pct)
             if self._detect_pct >= t:
@@ -318,7 +508,7 @@ class LiteMonitor:
             if self._detect_pct < t:
                 if self.recovery_start is None:
                     self.recovery_start = now
-                elif now - self.recovery_start >= RECOVERY_SEC:
+                elif now - self.recovery_start >= self._recovery_sec:
                     self.state = MONITORING
                     self.recovery_start = None
             else:
@@ -327,10 +517,8 @@ class LiteMonitor:
             outdata[:] = 0
 
     def _start_stream(self) -> bool:
-        """Find devices, open stream, begin calibration. Returns True on success."""
         self._stop_stream()
         self.in_idx, self.out_idx, self.in_name, self.out_name = auto_select_devices()
-
         if self.in_idx is None or self.out_idx is None:
             return False
         try:
@@ -343,7 +531,6 @@ class LiteMonitor:
         except Exception:
             self.stream = None
             return False
-
         self.cal_samples.clear()
         self.cal_start = time.perf_counter()
         self.state     = CALIBRATING
@@ -357,7 +544,6 @@ class LiteMonitor:
 
     # ── Background threads ────────────────────────────────────────────────────
     def _watchdog_loop(self):
-        """Checks stream health; auto-restarts if device disconnects."""
         while self._running:
             time.sleep(WATCHDOG_INTERVAL)
             if not self._running:
@@ -372,14 +558,12 @@ class LiteMonitor:
                         self._refresh_icon()
 
     def _icon_refresh_loop(self):
-        """Updates tray icon and fires notifications on state changes."""
         while self._running:
             time.sleep(0.4)
             if self.state != self._prev_state:
                 prev = self._prev_state
                 self._prev_state = self.state
                 self._refresh_icon()
-                # Notify on mute (but not on first startup or recalibration)
                 if self.state == TRIGGERED and prev == MONITORING:
                     self._notify('Output muted')
                 elif self.state == MONITORING and prev == TRIGGERED:
@@ -389,10 +573,9 @@ class LiteMonitor:
     def run(self):
         ok = self._start_stream()
         if not ok:
-            # Still launch — watchdog will retry
             self.state = IDLE
 
-        threading.Thread(target=self._watchdog_loop,    daemon=True).start()
+        threading.Thread(target=self._watchdog_loop,     daemon=True).start()
         threading.Thread(target=self._icon_refresh_loop, daemon=True).start()
 
         self._icon = pystray.Icon(
@@ -401,7 +584,27 @@ class LiteMonitor:
             f'Mic Monitor Lite  —  {self._status_text()}',
             menu=self._build_menu(),
         )
-        self._icon.run()          # blocks until _tray_quit calls icon.stop()
+        self._icon.run_detached()
+
+        # Main thread: tkinter hidden root for toasts and settings window
+        self._root = tk.Tk()
+        self._root.withdraw()
+        self._root.configure(bg=BG)
+
+        try:
+            while self._running:
+                if self._pending_settings:
+                    self._pending_settings = False
+                    SettingsWindow(self)
+                self._root.update()
+                time.sleep(0.05)
+        except tk.TclError:
+            pass
+        finally:
+            try:
+                self._root.destroy()
+            except Exception:
+                pass
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

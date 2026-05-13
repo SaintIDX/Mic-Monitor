@@ -98,6 +98,70 @@ In each app, set the microphone to:
 
 
 ─────────────────────────────────────────────────────────────
+  PART 3B — VB-AUDIO CONFLICTS & ADVANCED ROUTING
+─────────────────────────────────────────────────────────────
+
+IF VB-AUDIO CABLE IS ALREADY IN USE
+─────────────────────────────────────
+If another application (RTX Voice, Voicemeeter, OBS virtual
+cam, etc.) is already writing to CABLE Input, Windows will
+MIX both signals together. Discord would hear both the
+processed audio from Mic Monitor AND the original unprocessed
+signal at the same time — causing echo or doubling.
+
+Solution: install additional virtual cables (free):
+  https://vb-audio.com/Cable/  →  download "VBCABLE_A+B"
+
+This gives you Cable A and Cable B as separate channels.
+Use Cable A for Mic Monitor, leave Cable B for other apps:
+
+  Microphone  →  Mic Monitor  →  CABLE A Input
+                                       ↓
+                                 CABLE A Output  →  Discord
+
+No code changes needed — just select the right device
+in Mic Monitor's Output dropdown.
+
+
+CHAINING WITH OTHER AUDIO PROCESSORS
+───────────────────────────────────────
+If you use RTX Voice, Krisp, or similar noise suppression
+alongside Mic Monitor, place Mic Monitor FIRST in the chain
+(closest to the raw microphone signal):
+
+  Microphone  →  Mic Monitor  →  CABLE A Input
+                                       ↓
+                                 CABLE A Output  →  RTX Voice
+                                                        ↓
+                                                  CABLE Input  →  Discord
+
+This way Mic Monitor gates the raw signal before noise
+suppression processes it.
+
+
+STUDIO MICROPHONES & AUDIO INTERFACES
+───────────────────────────────────────
+XLR microphones connected via an audio interface (Focusrite,
+SSL, Behringer, etc.) appear as standard Windows audio
+devices — Mic Monitor works with them the same as any USB mic.
+
+Potential issues and fixes:
+
+  DAW holds the interface in WASAPI exclusive mode
+    → Close the DAW, or set Mic Monitor to Standard (MME)
+      in Settings → Audio Engine
+
+  Interface only has an ASIO driver (rare)
+    → Install the interface manufacturer's WDM driver,
+      or install ASIO4ALL (https://asio4all.org)
+
+  Interface is set to 192 kHz or 96 kHz sample rate
+    → Lower it to 48 kHz in Windows sound settings:
+      Control Panel → Sound → your interface → Properties
+      → Advanced → Default Format → 48000 Hz
+
+
+─────────────────────────────────────────────────────────────
   PART 4 — MAIN PAGE EXPLAINED
 ─────────────────────────────────────────────────────────────
 

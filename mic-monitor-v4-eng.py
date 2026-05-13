@@ -18,7 +18,7 @@ except ImportError as _e:
         f"{_e}\n\nInstall with:\n    pip install sounddevice numpy")
     raise SystemExit(1)
 
-import math, threading, time, json, os
+import math, threading, time, json, os, sys
 from datetime import datetime
 
 try:
@@ -55,6 +55,8 @@ DEFAULT_SETTINGS = {
     "peak_hold_sec":        2.0,
     "dark_mode":            True,
     "launch_to_tray":       False,
+    "start_with_windows":   False,
+    "mute_notifications":   True,
     "audio_mode":           "standard",
     "output_mode":          "gate",
     "compressor_reduction": 80,
@@ -198,6 +200,8 @@ class App:
         clamp_int  ('compressor_reduction', 0,   100,  80)
         ensure_bool('dark_mode',            True)
         ensure_bool('launch_to_tray',       False)
+        ensure_bool('start_with_windows',   False)
+        ensure_bool('mute_notifications',   True)
         ensure_bool('show_baseline_label',  True)
         ensure_bool('show_threshold_label', True)
         ensure_bool('show_log',             True)
@@ -210,6 +214,78 @@ class App:
         try:
             with open(SETTINGS_PATH, 'w') as f:
                 json.dump(self.settings, f, indent=2)
+        except Exception:
+            pass
+
+    # ──────────────────────────────────────────────
+    # Windows autostart (registry)
+    # ──────────────────────────────────────────────
+    def _autostart_cmd(self) -> str:
+        """Command written to the registry Run key."""
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller .exe
+            return f'"{sys.executable}"'
+        return f'"{sys.executable}" "{os.path.abspath(__file__)}"'
+
+    def _set_autostart(self, enabled: bool) -> bool:
+        """Write or remove HKCU Run key. Returns True on success."""
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r'Software\Microsoft\Windows\CurrentVersion\Run',
+                0, winreg.KEY_SET_VALUE)
+            if enabled:
+                winreg.SetValueEx(key, 'MicMonitor', 0,
+                                  winreg.REG_SZ, self._autostart_cmd())
+            else:
+                try:
+                    winreg.DeleteValue(key, 'MicMonitor')
+                except FileNotFoundError:
+                    pass
+            winreg.CloseKey(key)
+            return True
+        except Exception:
+            return False
+
+    # ──────────────────────────────────────────────
+    # Toast notification
+    # ──────────────────────────────────────────────
+    def _show_toast(self, title: str, message: str = ''):
+        """Show notification. Tray balloon when hidden, overlay when visible."""
+        if not self.settings.get('mute_notifications', True):
+            return
+        # Window is hidden in tray → use pystray balloon
+        if self._tray_icon is not None and not self.root.winfo_viewable():
+            try:
+                self._tray_icon.notify(message or title, title)
+            except Exception:
+                pass
+            return
+        # Window is visible → small auto-dismiss overlay (bottom-right)
+        try:
+            pal = self.p()
+            t = tk.Toplevel()
+            t.overrideredirect(True)
+            t.attributes('-topmost', True)
+            t.attributes('-alpha', 0.93)
+            t.configure(bg=pal['S1'])
+
+            pad = tk.Frame(t, bg=pal['S1'], padx=14, pady=10)
+            pad.pack()
+            tk.Label(pad, text=title, bg=pal['S1'], fg=pal['FG'],
+                     font=('Segoe UI', 9, 'bold')).pack(anchor='w')
+            if message:
+                tk.Label(pad, text=message, bg=pal['S1'], fg=pal['GRY'],
+                         font=('Segoe UI', 8)).pack(anchor='w', pady=(2, 0))
+
+            t.update_idletasks()
+            sw = t.winfo_screenwidth()
+            sh = t.winfo_screenheight()
+            w  = t.winfo_reqwidth()
+            h  = t.winfo_reqheight()
+            t.geometry(f'{w}x{h}+{sw - w - 20}+{sh - h - 60}')
+            t.after(2500, t.destroy)
         except Exception:
             pass
 
@@ -584,6 +660,26 @@ class App:
                     font=('Segoe UI', 7)).pack(side='left', padx=(6, 0))
         row(ap, 'System tray', build_tray_start)
 
+        self._autostart_var = tk.BooleanVar(
+            value=self.settings.get('start_with_windows', False))
+        def build_autostart(r):
+            tk.Checkbutton(r, text='Start with Windows',
+                variable=self._autostart_var,
+                bg=pal['S2'], fg=pal['FG'], selectcolor=pal['BDR'],
+                activebackground=pal['S2'], font=('Segoe UI', 8),
+                command=self._on_autostart_change).pack(side='left')
+        row(ap, 'Autostart', build_autostart)
+
+        self._notif_var = tk.BooleanVar(
+            value=self.settings.get('mute_notifications', True))
+        def build_notif(r):
+            tk.Checkbutton(r, text='Show notification when muted',
+                variable=self._notif_var,
+                bg=pal['S2'], fg=pal['FG'], selectcolor=pal['BDR'],
+                activebackground=pal['S2'], font=('Segoe UI', 8),
+                command=self._on_notif_change).pack(side='left')
+        row(ap, 'Notifications', build_notif)
+
         # ── MAIN PAGE WIDGETS ─────────────────────
         wp = section('MAIN PAGE WIDGETS')
         self._show_baseline_var  = tk.BooleanVar(
@@ -823,6 +919,23 @@ class App:
 
     def _on_launch_tray_change(self):
         self.settings['launch_to_tray'] = self._launch_tray_var.get()
+        self._save_settings()
+
+    def _on_autostart_change(self):
+        enabled = self._autostart_var.get()
+        self.settings['start_with_windows'] = enabled
+        self._save_settings()
+        ok = self._set_autostart(enabled)
+        if not ok:
+            self._autostart_var.set(False)
+            self.settings['start_with_windows'] = False
+            self._save_settings()
+            mb.showerror("Autostart",
+                "Could not write to the Windows registry.\n"
+                "Try running the program as administrator.")
+
+    def _on_notif_change(self):
+        self.settings['mute_notifications'] = self._notif_var.get()
         self._save_settings()
 
     def _on_widget_toggle(self, var, key):
@@ -1116,6 +1229,7 @@ class App:
     def _gui_triggered(self):
         self._log('Level exceeded threshold — output muted', 'warn')
         self._update_tray_icon()
+        self._show_toast('Mic Monitor', 'Output muted')
 
     def _gui_recovered(self):
         self._log('Level recovered — monitoring resumed', 'recover')

@@ -1,4 +1,4 @@
-name: Build Windows executable
+name: Build Windows executables
 
 on:
   release:
@@ -22,20 +22,32 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build English executable
-        run: |
-          pyinstaller --onefile --noconsole --name mic-monitor mic-monitor-v3-eng.py
+      - name: Build main app  (mic-monitor-v4-eng.py)
+        run: >
+          pyinstaller
+          --onefile
+          --noconsole
+          --name mic-monitor
+          --hidden-import pystray._win32
+          --collect-submodules PIL
+          mic-monitor-v4-eng.py
 
-      - name: Build Finnish executable
-        run: |
-          pyinstaller --onefile --noconsole --name mikki-monitori mikki-monitori-v3.py
+      - name: Build lite app  (mic-monitor-lite.py)
+        run: >
+          pyinstaller
+          --onefile
+          --noconsole
+          --name mic-monitor-lite
+          --hidden-import pystray._win32
+          --collect-submodules PIL
+          mic-monitor-lite.py
 
-      - name: Upload English exe to release
+      - name: Upload mic-monitor.exe
         uses: softprops/action-gh-release@v2
         with:
           files: dist/mic-monitor.exe
 
-      - name: Upload Finnish exe to release
+      - name: Upload mic-monitor-lite.exe
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/mikki-monitori.exe
+          files: dist/mic-monitor-lite.exe

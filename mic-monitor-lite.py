@@ -118,21 +118,52 @@ class LiteMonitor:
 
     # ── Settings ──────────────────────────────────────────────────────────────
     def _load_settings(self):
-        self._threshold = 70
+        self._threshold          = 70
+        self._start_with_windows = False
+        self._notifications      = True
         try:
             with open(SETTINGS_PATH) as f:
                 raw = json.load(f)
-            t = raw.get('threshold', 70)
-            self._threshold = max(1, min(100, int(t)))
+            self._threshold          = max(1, min(100, int(raw.get('threshold', 70))))
+            self._start_with_windows = bool(raw.get('start_with_windows', False))
+            self._notifications      = bool(raw.get('notifications', True))
         except Exception:
             pass
 
     def _save_settings(self):
         try:
             with open(SETTINGS_PATH, 'w') as f:
-                json.dump({'threshold': self._threshold}, f)
+                json.dump({
+                    'threshold':          self._threshold,
+                    'start_with_windows': self._start_with_windows,
+                    'notifications':      self._notifications,
+                }, f)
         except Exception:
             pass
+
+    # ── Windows autostart ─────────────────────────────────────────────────────
+    def _autostart_cmd(self) -> str:
+        if getattr(sys, 'frozen', False):
+            return f'"{sys.executable}"'
+        return f'"{sys.executable}" "{os.path.abspath(__file__)}"'
+
+    def _set_autostart(self, enabled: bool) -> bool:
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r'Software\Microsoft\Windows\CurrentVersion\Run',
+                0, winreg.KEY_SET_VALUE)
+            if enabled:
+                winreg.SetValueEx(key, 'MicMonitorLite', 0,
+                                  winreg.REG_SZ, self._autostart_cmd())
+            else:
+                try:    winreg.DeleteValue(key, 'MicMonitorLite')
+                except FileNotFoundError: pass
+            winreg.CloseKey(key)
+            return True
+        except Exception:
+            return False
 
     # ── Tray icon helpers ─────────────────────────────────────────────────────
     def _status_text(self) -> str:
@@ -187,6 +218,23 @@ class LiteMonitor:
             for label, value in THRESHOLD_PRESETS
         ]
 
+        def toggle_autostart(icon, item):
+            self._start_with_windows = not self._start_with_windows
+            ok = self._set_autostart(self._start_with_windows)
+            if not ok:
+                self._start_with_windows = False
+            self._save_settings()
+
+        def autostart_checked(item):
+            return self._start_with_windows
+
+        def toggle_notif(icon, item):
+            self._notifications = not self._notifications
+            self._save_settings()
+
+        def notif_checked(item):
+            return self._notifications
+
         return pystray.Menu(
             # Live status (text rebuilt on each menu open via lambda)
             pystray.MenuItem(
@@ -203,10 +251,24 @@ class LiteMonitor:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('Recalibrate', self._tray_recalibrate),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem('Start with Windows',
+                toggle_autostart, checked=autostart_checked),
+            pystray.MenuItem('Notifications when muted',
+                toggle_notif, checked=notif_checked),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem('Quit', self._tray_quit),
         )
 
     # ── Tray actions ──────────────────────────────────────────────────────────
+    def _notify(self, message: str):
+        """Send a balloon notification from the tray icon."""
+        if not self._notifications or self._icon is None:
+            return
+        try:
+            self._icon.notify(message, 'Mic Monitor Lite')
+        except Exception:
+            pass
+
     def _tray_recalibrate(self, icon=None, item=None):
         if self.state in (MONITORING, TRIGGERED):
             self.cal_samples.clear()
@@ -310,12 +372,18 @@ class LiteMonitor:
                         self._refresh_icon()
 
     def _icon_refresh_loop(self):
-        """Updates the tray icon when state changes (avoids calling from audio thread)."""
+        """Updates tray icon and fires notifications on state changes."""
         while self._running:
             time.sleep(0.4)
             if self.state != self._prev_state:
+                prev = self._prev_state
                 self._prev_state = self.state
                 self._refresh_icon()
+                # Notify on mute (but not on first startup or recalibration)
+                if self.state == TRIGGERED and prev == MONITORING:
+                    self._notify('Output muted')
+                elif self.state == MONITORING and prev == TRIGGERED:
+                    self._notify('Monitoring resumed')
 
     # ── Entry point ───────────────────────────────────────────────────────────
     def run(self):

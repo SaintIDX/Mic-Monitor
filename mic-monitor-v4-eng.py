@@ -148,8 +148,9 @@ class App:
         self._peak_hold_sec  = float(self.settings['peak_hold_sec'])
         self._peak_pct       = 0.0
         self._peak_time      = 0.0
-        self._on_settings_page = False
-        self._tray_icon      = None
+        self._on_settings_page  = False
+        self._tray_icon         = None
+        self._watchdog_counter  = 0        # counts GUI frames for 1-Hz watchdog
 
         self._configure_ttk()
         self._build_ui()
@@ -171,6 +172,39 @@ class App:
                 self.settings.update(json.load(f))
         except (FileNotFoundError, json.JSONDecodeError):
             pass
+        self._validate_settings()
+
+    def _validate_settings(self):
+        """Clamp / type-check every setting so a hand-edited file cannot crash the app."""
+        s = self.settings
+
+        def clamp_int(k, lo, hi, d):
+            try:    s[k] = max(lo, min(hi, int(s.get(k, d))))
+            except (TypeError, ValueError): s[k] = d
+
+        def clamp_float(k, lo, hi, d):
+            try:    s[k] = max(lo, min(hi, float(s.get(k, d))))
+            except (TypeError, ValueError): s[k] = d
+
+        def ensure_bool(k, d):
+            if not isinstance(s.get(k), bool): s[k] = d
+
+        def ensure_choice(k, choices, d):
+            if s.get(k) not in choices: s[k] = d
+
+        clamp_int  ('threshold',            1,   100,  70)
+        clamp_float('recovery_sec',         0.5, 10.0, 2.0)
+        clamp_float('peak_hold_sec',        0.5, 5.0,  2.0)
+        clamp_int  ('compressor_reduction', 0,   100,  80)
+        ensure_bool('dark_mode',            True)
+        ensure_bool('launch_to_tray',       False)
+        ensure_bool('show_baseline_label',  True)
+        ensure_bool('show_threshold_label', True)
+        ensure_bool('show_log',             True)
+        ensure_bool('show_peak_hold',       False)
+        ensure_choice('audio_mode',
+            ('standard', 'wasapi_shared', 'wasapi_exclusive'), 'standard')
+        ensure_choice('output_mode', ('gate', 'compressor'), 'gate')
 
     def _save_settings(self):
         try:
@@ -1012,6 +1046,11 @@ class App:
     # Audio callback  (audio thread — no GUI calls!)
     # ──────────────────────────────────────────────
     def _audio_cb(self, indata, outdata, frames, cb_time, status):
+        # Report driver-level issues (overflow / underflow) to the log
+        if status:
+            self.root.after(0,
+                lambda s=str(status): self._log(f'Audio warning: {s}', 'warn'))
+
         rms  = float(np.sqrt(np.mean(indata ** 2)))
         dbfs = 20.0 * math.log10(rms) if rms > 1e-9 else -100.0
         raw  = dbfs_to_pct(dbfs)
@@ -1023,17 +1062,20 @@ class App:
         t   = self._threshold_pct
 
         if self.state == CALIBRATING:
-            self.cal_samples.append(raw)
+            if len(self.cal_samples) < 500:   # hard cap — safety against stalled stream
+                self.cal_samples.append(raw)
             outdata[:] = indata
             if now - self.cal_start >= CAL_DURATION:
-                self.baseline_pct = median(self.cal_samples)
+                with self._lock:
+                    self.baseline_pct = median(self.cal_samples)
                 self.state = MONITORING
                 self.root.after(0, self._gui_cal_done)
 
         elif self.state == MONITORING:
             if self._detect_pct < t * BASELINE_QUIET_RATIO:
-                self.baseline_pct = (BASELINE_ALPHA * raw
-                                     + (1 - BASELINE_ALPHA) * self.baseline_pct)
+                with self._lock:                        # protect read-modify-write
+                    self.baseline_pct = (BASELINE_ALPHA * raw
+                                         + (1 - BASELINE_ALPHA) * self.baseline_pct)
             if self._detect_pct >= t:
                 self._apply_output(outdata, indata, muted=True)
                 self.state = TRIGGERED; self.recovery_start = None
@@ -1085,6 +1127,15 @@ class App:
     def _update_loop(self):
         disp = self._display_pct
         now  = time.perf_counter()
+
+        # ── Stream watchdog (runs ~once per second) ────────────────────────────
+        self._watchdog_counter += 1
+        if self._watchdog_counter >= GUI_FPS:
+            self._watchdog_counter = 0
+            if self.state not in (IDLE, CALIBRATING):
+                if self.stream is None or not self.stream.active:
+                    self._log('Audio stream lost — stopped', 'warn')
+                    self._stop()
 
         self._redraw_bar(disp)
 

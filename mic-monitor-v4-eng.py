@@ -390,8 +390,8 @@ class App:
         self._dev_tip_labels  = []
 
         for col, (icon, tip, attr_v, attr_cb, skey) in enumerate([
-            ('🎤', 'Input (microphone)',      'in_var',  'in_cb',  'in_device'),
-            ('🔊', 'Output (VB-Audio Cable)', 'out_var', 'out_cb', 'out_device'),
+            ('🎤', 'Input (microphone)',  'in_var',  'in_cb',  'in_device'),
+            ('🔊', 'Output device',      'out_var', 'out_cb', 'out_device'),
         ]):
             cell = tk.Frame(self.dev_frame, bg=pal['BG'])
             cell.pack(side='left', expand=True, fill='x',

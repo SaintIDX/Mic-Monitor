@@ -31,14 +31,12 @@ pip install -r requirements.txt
 python mic-monitor-v3-eng.py
 ```
 
-## Build .exe
+## Build .exe (optional)
 
 ```bash
 pip install pyinstaller
 pyinstaller --onefile --noconsole mic-monitor-v3-eng.py
 ```
-
-Or download a pre-built `.exe` from [Releases](../../releases).
 
 ---
 

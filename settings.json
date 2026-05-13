@@ -1,0 +1,16 @@
+{
+  "in_device": "Microphone (Razer BlackShark V2",
+  "out_device": "CABLE Input (2- VB-Audio Virtua",
+  "threshold": 69,
+  "recovery_sec": 6.0,
+  "peak_hold_sec": 4.5,
+  "dark_mode": true,
+  "launch_to_tray": false,
+  "audio_mode": "standard",
+  "output_mode": "gate",
+  "compressor_reduction": 80,
+  "show_baseline_label": false,
+  "show_threshold_label": false,
+  "show_log": false,
+  "show_peak_hold": false
+}

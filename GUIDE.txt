@@ -1,14 +1,15 @@
 ═══════════════════════════════════════════════════════════════
-  MIC MONITOR v3.0 — Installation & Usage Guide
+  MIC MONITOR v4.0 — Full Feature Guide
 ═══════════════════════════════════════════════════════════════
 
 WHAT IT DOES
 ────────────
 Mic Monitor sits between your real microphone and other
-applications. It listens to your mic in real time and mutes
-the output automatically when the volume gets too loud (e.g.
-handling noise, bangs, shouting). Once the level drops back
-to normal for 2 seconds, audio resumes automatically.
+applications (Discord, Teams, OBS, Zoom). It listens to your
+mic in real time and mutes or reduces the output automatically
+when the volume gets too loud — for example: handling noise,
+bangs on the desk, or sudden shouting. Once the level returns
+to normal, audio resumes automatically.
 
 Nothing is recorded or written to disk. No data is sent over
 the network. The audio buffer is ~10 ms in RAM and disappears
@@ -21,33 +22,40 @@ the moment the program closes.
 
 STEP 1: Python
 ──────────────
-1. Open your browser and go to: https://python.org/downloads
+1. Go to: https://python.org/downloads
 2. Download the latest Python 3.x (Windows installer, 64-bit)
 3. Run the installer
    IMPORTANT: check "Add Python to PATH" before clicking
-   Install Now — otherwise the next steps won't work
+   Install Now — otherwise the next steps will not work
 4. Complete the installation
 
 
 STEP 2: Python libraries
 ─────────────────────────
 1. Open Command Prompt (search "cmd" in the Start menu)
-2. Paste the following command and press Enter:
+2. Paste and press Enter:
 
-   pip install sounddevice numpy
+   pip install sounddevice numpy pystray pillow
 
-3. Wait for it to finish (you'll see: Successfully installed...)
+   (pystray and pillow are needed for system tray support)
+3. Wait for: Successfully installed...
 
 
-STEP 3: VB-Audio Virtual Cable (if not already installed)
-──────────────────────────────────────────────────────────
+STEP 3: VB-Audio Virtual Cable
+───────────────────────────────
 1. Go to: https://vb-audio.com/Cable/
 2. Download "VBCABLE_Driver_Pack43.zip" (or newer)
 3. Extract the zip file
 4. RIGHT-CLICK "VBCABLE_Setup_x64.exe"
-   → Select "Run as administrator"
-5. Click Install Driver
-6. Restart your computer if prompted
+   → Run as administrator
+5. Click Install Driver — restart if prompted
+
+VB-Audio Virtual Cable creates two virtual audio endpoints:
+  • CABLE Input  — appears as a playback (output) device
+  • CABLE Output — appears as a recording (microphone) device
+
+Mic Monitor writes processed audio to CABLE Input.
+Discord / Teams / OBS read from CABLE Output.
 
 
 ─────────────────────────────────────────────────────────────
@@ -56,112 +64,285 @@ STEP 3: VB-Audio Virtual Cable (if not already installed)
 
 STEP 4: Launch the program
 ───────────────────────────
-Option A — Command line (recommended):
-  1. Open Command Prompt
-  2. Type:  cd C:\Users\Mikael\Projects\mikki-monitori
-  3. Type:  python mic-monitor-v3-eng.py
+  Option A — Command line:
+    1. Open Command Prompt
+    2. cd  to the folder containing the .py file
+    3. Type:  python mic-monitor-v4-eng.py
 
-Option B — Double-click:
-  Right-click "mic-monitor-v3-eng.py" → Open with → Python
+  Option B — Double-click:
+    Right-click mic-monitor-v4-eng.py → Open with → Python
 
 
 ─────────────────────────────────────────────────────────────
-  PART 3 — VB-AUDIO ROUTING
+  PART 3 — ROUTING SETUP
 ─────────────────────────────────────────────────────────────
 
 STEP 5: Select devices in the program
 ───────────────────────────────────────
-The top of the window has two dropdowns:
+  🎤 Input  → your real microphone
+              e.g. "Microphone (Realtek Audio)"
 
-  🎤 Input   → Select YOUR real microphone
-               (e.g. "Microphone (Realtek Audio)")
-
-  🔊 Output  → Select "CABLE Input (VB-Audio Virtual Cable)"
-               (the program tries to auto-select this)
+  🔊 Output → "CABLE Input (VB-Audio Virtual Cable)"
+              The program tries to auto-select this.
 
 
 STEP 6: Set the microphone in Discord / Teams / OBS / Zoom
 ────────────────────────────────────────────────────────────
-In each app, change the microphone (input device) to:
+In each app, set the microphone to:
   "CABLE Output (VB-Audio Virtual Cable)"
 
-  Discord:
-    Settings → Voice & Video → Input Device
-    → CABLE Output (VB-Audio Virtual Cable)
-
-  Microsoft Teams:
-    Settings → Devices → Microphone
-    → CABLE Output (VB-Audio Virtual Cable)
-
-  OBS:
-    Settings → Audio → Mic/Auxiliary Audio
-    → CABLE Output (VB-Audio Virtual Cable)
-
-  Zoom:
-    Settings → Audio → Microphone
-    → CABLE Output (VB-Audio Virtual Cable)
+  Discord:  Settings → Voice & Video → Input Device
+  Teams:    Settings → Devices → Microphone
+  OBS:      Settings → Audio → Mic/Auxiliary Audio
+  Zoom:     Settings → Audio → Microphone
 
 
 ─────────────────────────────────────────────────────────────
-  PART 4 — HOW TO USE IT
+  PART 4 — MAIN PAGE EXPLAINED
 ─────────────────────────────────────────────────────────────
 
-CALIBRATION (automatic)
-────────────────────────
-When you press "Start monitoring", the program calibrates for
-1.5 seconds. Stay quiet during this time — it learns your
-normal background noise level (shown as a blue dashed line
-on the meter after calibration).
+HEADER
+───────
+  🎙 Mic Monitor     — program name
+  ● colored dot      — live status indicator
+    Gray    = stopped
+    Blue    = calibrating
+    Green   = monitoring, audio passing through normally
+    Yellow  = triggered, output muted or reduced
 
-The baseline adapts continuously while monitoring: it slowly
-drifts to follow your ambient noise level, but only during
-quiet moments — loud sounds never affect the baseline.
+  → (minimize)       — sends the window to the system tray
+                       (requires pystray + pillow installed)
+  ⚙ (settings)       — opens / closes the Settings page
+
+
+DEVICE DROPDOWNS
+─────────────────
+  🎤 Input   — your physical microphone
+  🔊 Output  — the virtual cable output
+
+  Selections are saved automatically and restored on restart.
+  If you switch Audio Mode to WASAPI in Settings, only WASAPI
+  devices will appear here.
+
+
+METER BAR
+──────────
+  The gradient bar (green → yellow → red) shows the current
+  microphone level in real time.
+
+  Blue dashed line  — your calibrated baseline level
+                      (where your ambient noise sits)
+  Red solid line    — your mute threshold
+                      (audio is muted when level crosses this)
+  White marker      — peak hold indicator
+                      (shows the highest recent level;
+                       enabled in Settings → Main Page Widgets)
+
+  Scale below: 0 % = silence, 100 % = maximum signal
+
+
+BASELINE INFO  /  THRESHOLD INFO  (below the meter)
+────────────────────────────────────────────────────
+  "Baseline  42 %"  — current adaptive baseline level
+  "Threshold  70 %" — current mute threshold
+
+  Both can be hidden in Settings → Main Page Widgets.
+
 
 MUTE THRESHOLD SLIDER
 ──────────────────────
-Sets the level (0–100 %) at which the output is muted.
-The red line on the meter shows exactly where the threshold
-is. Adjust until the red line sits clearly above your normal
-speaking level.
+  Drag to set the level at which audio is muted or reduced.
+  The red line on the meter moves in sync.
 
-  Low value  (e.g. 30 %) = very sensitive — mutes easily
-  Mid value  (e.g. 60 %) = typical use
-  High value (e.g. 85 %) = only mutes very loud sounds
+  Suggested range:
+    30–50 %  very sensitive, mutes easily
+    60–75 %  typical use
+    80–90 %  only very loud sounds trigger muting
 
-Tip: calibrate first, then set the threshold so the red line
-is well above the blue baseline line.
+  Tip: calibrate first (press Start, stay quiet 1.5 s),
+  then set the threshold so the red line sits clearly above
+  the blue baseline line.
 
-AUTO-RESUME
-────────────
-When the level drops back below the threshold, the program
-waits 2 seconds and then resumes automatically. The header
-shows a live countdown: "Muted — resuming in 1.4 s".
 
-WHAT THE COLORS MEAN
-─────────────────────
-  ● Gray dot    — stopped
-  ● Blue dot    — calibrating
-  ● Green dot   — monitoring active, audio passing through
-  ● Yellow dot  — output muted, waiting to resume
+START / STOP BUTTON
+────────────────────
+  ▶ Start monitoring — opens the audio stream and begins
+                        the 1.5-second calibration
+  ⏹ Stop            — closes the audio stream completely
 
-  Blue dashed line on meter  — your calibrated baseline
-  Red solid line on meter    — your mute threshold
+  While calibrating: stay quiet for 1.5 seconds. The program
+  measures the median background noise level and sets it as
+  the baseline.
+
+
+SEND TO TRAY BUTTON
+────────────────────
+  Hides the main window and keeps the program running in the
+  Windows system tray (bottom-right corner of the taskbar).
+  Right-click the tray icon to Show window, Start/Stop, Quit.
+  Tray icon color matches the status dot.
+
+
+MINI LOG
+─────────
+  Shows recent events with timestamps:
+    [HH:MM:SS]  Calibration started — stay quiet
+    [HH:MM:SS]  Ready — baseline 42 %, threshold 70 %
+    [HH:MM:SS]  Level exceeded threshold — output muted
+    [HH:MM:SS]  Level recovered — monitoring resumed
+    [HH:MM:SS]  Stopped
+
+  Can be hidden in Settings → Main Page Widgets.
 
 
 ─────────────────────────────────────────────────────────────
-  PART 5 — SECURITY
+  PART 5 — SETTINGS PAGE EXPLAINED  (⚙ icon)
 ─────────────────────────────────────────────────────────────
 
-• No network connections — safe to run behind a firewall
-  or completely offline
-• Nothing is written to disk
-• Audio buffer is ~10 ms in RAM, cleared when the program
-  closes — no audio is ever retained
-• Full source code is readable in mic-monitor-v3-eng.py
-  — you can verify every line yourself
-• VB-Audio Virtual Cable is a kernel-level audio driver,
-  like any sound card driver — it does not record or
-  transmit audio, but it is closed-source
+Open Settings by clicking the ⚙ icon in the top-right corner.
+Click ✕ to return to the main page.
+All settings save automatically as you change them.
+
+
+APPEARANCE
+───────────
+  Theme: Dark / Light
+    Switches the entire color scheme.
+    Dark mode uses a GitHub-style dark palette.
+    Light mode uses a clean light gray palette.
+
+  System tray — Launch to tray on startup
+    When enabled: the main window starts hidden and only the
+    system tray icon is visible. Click the icon to show it.
+    Requires pystray + pillow:  pip install pystray pillow
+
+
+MAIN PAGE WIDGETS
+──────────────────
+  Checkboxes to show or hide parts of the main page:
+
+  ☑ Baseline info label
+    The "Baseline  42 %" text below the meter.
+    Shows where your calibrated noise floor sits.
+
+  ☑ Threshold info label
+    The "Threshold  70 %" text below the meter.
+    Shows the current mute trigger level.
+
+  ☑ Mini log
+    The event log at the bottom of the window.
+    Useful for seeing exactly when muting happened.
+
+  ☐ Peak hold indicator
+    Enables a white vertical line on the meter bar that
+    marks the highest level seen recently.
+    The line stays for the "Peak hold duration" and then
+    resets — useful for setting the threshold accurately
+    without needing to watch the meter continuously.
+
+
+MONITORING BEHAVIOR
+────────────────────
+  Recovery time  (0.5 – 10.0 s, default 2.0 s)
+    How long the level must stay below the threshold
+    before audio resumes.
+    Low value (0.5 s) — resumes very quickly after noise.
+    High value (5–10 s) — stays muted longer; useful if
+    you have frequent bursts of noise close together.
+
+  Peak hold duration  (0.5 – 5.0 s, default 2.0 s)
+    How long the white peak marker stays visible on the
+    meter before dropping back to the current level.
+    Only relevant when Peak hold indicator is enabled.
+
+
+AUDIO ENGINE
+─────────────
+  Audio mode
+    ○ Standard (MME)
+      Default Windows audio. Works on all systems.
+      Latency: ~20–30 ms.
+
+    ○ WASAPI shared
+      Windows Audio Session API, shared mode.
+      Lower latency (~5–10 ms). Other apps can still
+      use the same device simultaneously.
+
+    ○ WASAPI exclusive
+      Lowest possible latency (~3–5 ms). The program
+      takes exclusive control of the device — other
+      apps cannot use it at the same time.
+      Use only if you need minimum delay.
+
+    Note: switching to WASAPI mode reloads the device
+    list to show only WASAPI-compatible devices.
+
+  Output mode
+    ○ Noise gate (mute completely)
+      When triggered: output is completely silenced.
+      The standard behavior — clean and hard cut.
+
+    ○ Compressor (reduce volume)
+      When triggered: output volume is reduced instead
+      of silenced entirely. Subtler effect.
+
+    Reduction amount  (0 – 100 %, default 80 %)
+      How much the volume is reduced in compressor mode.
+      80 % reduction → only 20 % of original volume passes.
+      0 % → no reduction (no effect).
+      100 % → same as noise gate.
+      Only visible when Compressor mode is selected.
+
+
+─────────────────────────────────────────────────────────────
+  PART 6 — SYSTEM TRAY
+─────────────────────────────────────────────────────────────
+
+Requires pystray and Pillow:
+  pip install pystray pillow
+
+HOW TO USE
+───────────
+  • Click → in the header (or "Send to Tray" on main page)
+    to hide the window and send it to the system tray.
+  • A colored circle appears in the taskbar notification area
+    (bottom-right, near the clock).
+
+TRAY ICON COLORS
+─────────────────
+  Gray    — stopped / not monitoring
+  Blue    — calibrating
+  Green   — monitoring, passing audio
+  Yellow  — muted / triggered
+
+TRAY RIGHT-CLICK MENU
+──────────────────────
+  Show window       — brings the window back
+  Start / Stop      — toggles monitoring without opening window
+  ──────────────
+  Quit              — closes the program completely
+
+LAUNCH TO TRAY ON STARTUP
+──────────────────────────
+  Enable in Settings → Appearance → System tray.
+  On next launch: the window stays hidden, only the tray
+  icon appears. Click it to open the window.
+
+
+─────────────────────────────────────────────────────────────
+  PART 7 — SECURITY & PRIVACY
+─────────────────────────────────────────────────────────────
+
+• No network connections — verified in the source code.
+  Safe to use offline or behind corporate firewalls.
+• No audio is written to disk at any point.
+• Audio buffer is ~10 ms in RAM; cleared on program close.
+• settings.json stores only preferences (no audio data).
+• Full source code in mic-monitor-v4-eng.py — every line
+  is readable and auditable.
+• VB-Audio Virtual Cable is a closed-source kernel driver
+  but is widely used, reputable, and free. It does not
+  record or transmit audio.
 
 
 ─────────────────────────────────────────────────────────────
@@ -169,25 +350,45 @@ WHAT THE COLORS MEAN
 ─────────────────────────────────────────────────────────────
 
 "ModuleNotFoundError: No module named 'sounddevice'"
-  → Run:  pip install sounddevice numpy
+  → pip install sounddevice numpy
+
+"ModuleNotFoundError: No module named 'pystray'"
+  → pip install pystray pillow
+  → Tray features are optional; the program works without them
 
 Program doesn't hear the microphone
-  → Check Windows sound settings: make sure the mic is
-    enabled and has permission
-    Settings → Privacy → Microphone → Allow apps to access
+  → Windows Settings → Privacy & Security → Microphone
+    → Allow apps to access your microphone → ON
+  → Make sure the correct Input device is selected
 
-Other apps can't hear audio
-  → Make sure you selected "CABLE Output" (not Input)
-    as the microphone in Discord / Teams / etc.
-  → Make sure the Output dropdown in the program shows
+Other apps (Discord, Teams) can't hear audio
+  → In Discord/Teams, set microphone to:
+    "CABLE Output (VB-Audio Virtual Cable)"
+    NOT "CABLE Input"
+  → In Mic Monitor, Output must be:
     "CABLE Input (VB-Audio Virtual Cable)"
 
 Audio sounds slightly delayed
-  → Normal: ~10–20 ms latency is added by the processing
-  → The delay is on your end only — listeners are unaffected
+  → Normal: ~10–30 ms added by processing.
+    Listeners on the other end are not affected.
+  → Try WASAPI shared or exclusive mode for lower latency.
 
-Threshold triggers too easily / not enough
-  → Re-run calibration (stop and start again) in a quiet
-    environment, then adjust the slider
+WASAPI mode gives an error on startup
+  → Fall back to Standard (MME) in Settings → Audio Engine.
+  → Some audio interfaces do not support WASAPI exclusive.
+
+Threshold triggers too easily or too rarely
+  → Stop monitoring, wait for silence, start again to
+    recalibrate, then adjust the slider.
+  → Check that the baseline line (blue) is well below the
+    threshold line (red) on the meter.
+
+System tray icon does not appear
+  → pip install pystray pillow
+  → Restart the program after installing.
+
+Settings are not saved between sessions
+  → Check that settings.json can be written to the same
+    folder as the .py file (write permission).
 
 ═══════════════════════════════════════════════════════════════

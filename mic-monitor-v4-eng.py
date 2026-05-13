@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Mic Monitor v3.0  —  real-time audio level limiter
+Mic Monitor v4.0  —  real-time audio level limiter
 Routes microphone through VB-Audio Virtual Cable, muting output when too loud.
 Nothing is recorded or stored. No network connections.
 """
@@ -28,6 +28,11 @@ try:
 except ImportError:
     TRAY_AVAILABLE = False
 
+# ── Paths ─────────────────────────────────────────────────────────────────────
+_DIR          = os.path.dirname(os.path.abspath(__file__))
+SETTINGS_PATH = os.path.join(_DIR, 'settings.json')
+GUIDE_PATH    = os.path.join(_DIR, 'GUIDE.txt')
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 SAMPLE_RATE          = 48000
 BLOCK_SIZE           = 512
@@ -41,8 +46,6 @@ BASELINE_ALPHA       = 0.003
 BASELINE_QUIET_RATIO = 0.65
 
 IDLE='idle'; CALIBRATING='calibrating'; MONITORING='monitoring'; TRIGGERED='triggered'
-
-SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'settings.json')
 
 DEFAULT_SETTINGS = {
     "in_device":            "",
@@ -67,12 +70,18 @@ DARK = dict(
     FG='#e6edf3', GRY='#8b949e', DIM='#484f58',
     ACC='#58a6ff', GRN='#3fb950', YEL='#d29922', RED='#f85149',
     METER_BG='#151b23',
+    BTN_START='#1f6feb', BTN_START_A='#388bfd',
+    BTN_STOP='#b91c1c',  BTN_STOP_A='#cf2f2f',
+    BTN_TRAY='#21262d',  BTN_TRAY_A='#30363d',
 )
 LIGHT = dict(
     BG='#f6f8fa', S1='#ffffff', S2='#eaeef2', BDR='#d0d7de',
     FG='#1f2328', GRY='#57606a', DIM='#8c959f',
     ACC='#0969da', GRN='#1a7f37', YEL='#9a6700', RED='#cf222e',
     METER_BG='#e8edf2',
+    BTN_START='#0969da', BTN_START_A='#0550ae',
+    BTN_STOP='#cf222e',  BTN_STOP_A='#a40e26',
+    BTN_TRAY='#eaeef2',  BTN_TRAY_A='#d0d7de',
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -107,7 +116,7 @@ def get_devices(wasapi_only=False):
 class App:
     BAR_H = 72
 
-    # state → (palette-key for color, default status text)
+    # state → (palette color key, default status text)
     STATE_INFO = {
         IDLE:        ('DIM', 'Stopped'),
         CALIBRATING: ('ACC', 'Calibrating…'),
@@ -118,7 +127,8 @@ class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Mic Monitor")
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
+        self.root.minsize(400, 480)
 
         self._load_settings()
 
@@ -148,7 +158,8 @@ class App:
         self._update_loop()
 
         if self.settings.get('launch_to_tray') and TRAY_AVAILABLE:
-            self.root.after(200, self._minimize_to_tray)
+            # Wait for mainloop to start before hiding window
+            self.root.after(500, self._minimize_to_tray)
 
     # ──────────────────────────────────────────────
     # Settings persistence
@@ -216,29 +227,29 @@ class App:
                                    font=('Segoe UI', 11, 'bold'))
         self.hdr_title.pack(side='left')
 
-        # Right side buttons (pack right-to-left)
+        # Right side: gear, tray minimize, status
         self.gear_btn = tk.Button(self.hdr, text='⚙', bg=pal['S1'], fg=pal['GRY'],
             activebackground=pal['S2'], activeforeground=pal['FG'],
             font=('Segoe UI', 12), bd=0, relief='flat', cursor='hand2',
             command=self._toggle_page)
-        self.gear_btn.pack(side='right', padx=(0, 6))
+        self.gear_btn.pack(side='right', padx=(0, 8))
 
         if TRAY_AVAILABLE:
-            self.tray_btn = tk.Button(self.hdr, text='→', bg=pal['S1'], fg=pal['GRY'],
+            self.tray_hdr_btn = tk.Button(self.hdr, text='→', bg=pal['S1'], fg=pal['GRY'],
                 activebackground=pal['S2'], activeforeground=pal['FG'],
                 font=('Segoe UI', 12, 'bold'), bd=0, relief='flat', cursor='hand2',
                 command=self._minimize_to_tray)
-            self.tray_btn.pack(side='right', padx=(0, 2))
+            self.tray_hdr_btn.pack(side='right', padx=(0, 2))
         else:
-            self.tray_btn = None
+            self.tray_hdr_btn = None
 
         self.status_frame = tk.Frame(self.hdr, bg=pal['S1'])
         self.status_frame.pack(side='right', padx=(0, 8))
         self.dot = tk.Label(self.status_frame, text='●', bg=pal['S1'], fg=pal['DIM'],
                              font=('Segoe UI', 9))
         self.dot.pack(side='left', padx=(0, 5))
-        self.status_lbl = tk.Label(self.status_frame, text='Stopped', bg=pal['S1'],
-                                    fg=pal['DIM'], font=('Segoe UI', 8))
+        self.status_lbl = tk.Label(self.status_frame, text='Stopped',
+                                    bg=pal['S1'], fg=pal['DIM'], font=('Segoe UI', 8))
         self.status_lbl.pack(side='left')
 
         self.hdr_sep = tk.Frame(self.root, bg=pal['BDR'], height=1)
@@ -263,10 +274,10 @@ class App:
         self.dev_frame = tk.Frame(self.main_page, bg=pal['BG'])
         self.dev_frame.pack(fill='x', padx=14, pady=(8, 8))
 
+        self._dev_cell_frames = []
+        self._dev_top_frames  = []
         self._dev_icon_labels = []
         self._dev_tip_labels  = []
-        self._dev_top_frames  = []
-        self._dev_cell_frames = []
 
         for col, (icon, tip, attr_v, attr_cb, skey) in enumerate([
             ('🎤', 'Input (microphone)',      'in_var',  'in_cb',  'in_device'),
@@ -281,15 +292,15 @@ class App:
             top.pack(fill='x')
             self._dev_top_frames.append(top)
 
-            lbl_icon = tk.Label(top, text=icon, bg=pal['BG'], fg=pal['GRY'],
-                                 font=('Segoe UI', 10))
-            lbl_icon.pack(side='left')
-            self._dev_icon_labels.append(lbl_icon)
+            li = tk.Label(top, text=icon, bg=pal['BG'], fg=pal['GRY'],
+                          font=('Segoe UI', 10))
+            li.pack(side='left')
+            self._dev_icon_labels.append(li)
 
-            lbl_tip = tk.Label(top, text=tip, bg=pal['BG'], fg=pal['DIM'],
-                                font=('Segoe UI', 7))
-            lbl_tip.pack(side='left', padx=(4, 0))
-            self._dev_tip_labels.append(lbl_tip)
+            lt = tk.Label(top, text=tip, bg=pal['BG'], fg=pal['DIM'],
+                          font=('Segoe UI', 7))
+            lt.pack(side='left', padx=(4, 0))
+            self._dev_tip_labels.append(lt)
 
             var = tk.StringVar()
             setattr(self, attr_v, var)
@@ -297,7 +308,6 @@ class App:
                                state='readonly', width=22, font=('Segoe UI', 8))
             cb.pack(fill='x', pady=(2, 0))
             setattr(self, attr_cb, cb)
-
             var.trace_add('write',
                 lambda *_, av=attr_v, sk=skey: self._on_device_change(av, sk))
 
@@ -345,7 +355,8 @@ class App:
                                   bg=pal['BG'], fg=pal['ACC'], font=('Segoe UI', 8, 'bold'))
         self.thresh_info = tk.Label(self.info_frame,
                                      text=f'Threshold  {self.settings["threshold"]} %',
-                                     bg=pal['BG'], fg=pal['RED'], font=('Segoe UI', 8, 'bold'))
+                                     bg=pal['BG'], fg=pal['RED'],
+                                     font=('Segoe UI', 8, 'bold'))
 
         self.meter_sep = tk.Frame(self.main_page, bg=pal['BDR'], height=1)
         self.meter_sep.pack(fill='x')
@@ -360,30 +371,44 @@ class App:
                                      bg=pal['BG'], fg=pal['GRY'], font=('Segoe UI', 8))
         self.sl_head_lbl.pack(side='left')
         self.sl_badge = tk.Label(sl_head, text=f'{self.settings["threshold"]} %',
-                                  bg=pal['BG'], fg=pal['RED'], font=('Segoe UI', 9, 'bold'))
+                                  bg=pal['BG'], fg=pal['RED'],
+                                  font=('Segoe UI', 9, 'bold'))
         self.sl_badge.pack(side='right')
 
         self.thresh_var = tk.IntVar(value=self.settings['threshold'])
         self.thresh_var.trace_add('write', self._on_thresh_change)
 
-        self.thresh_scale = tk.Scale(self.slider_frame, from_=1, to=100, orient='horizontal',
-            variable=self.thresh_var, bg=pal['BG'], fg=pal['FG'],
-            troughcolor=pal['S2'], highlightthickness=0, bd=0,
-            sliderrelief='flat', showvalue=False)
+        self.thresh_scale = tk.Scale(self.slider_frame, from_=1, to=100,
+            orient='horizontal', variable=self.thresh_var,
+            bg=pal['BG'], fg=pal['FG'], troughcolor=pal['S2'],
+            highlightthickness=0, bd=0, sliderrelief='flat', showvalue=False)
         self.thresh_scale.pack(fill='x', pady=(4, 0))
 
         self.slider_sep = tk.Frame(self.main_page, bg=pal['BDR'], height=1)
         self.slider_sep.pack(fill='x')
 
-        # ── Start/Stop button ──────────────────────
+        # ── Start / Stop button ────────────────────
         self.btn = tk.Button(self.main_page,
             text='▶  Start monitoring',
-            bg='#1f6feb', fg=pal['FG'],
-            activebackground='#388bfd', activeforeground=pal['FG'],
+            bg=pal['BTN_START'], fg=pal['FG'],
+            activebackground=pal['BTN_START_A'], activeforeground=pal['FG'],
             font=('Segoe UI', 10, 'bold'),
             bd=0, pady=11, cursor='hand2', relief='flat',
             command=self.toggle)
-        self.btn.pack(fill='x', padx=14, pady=12)
+        self.btn.pack(fill='x', padx=14, pady=(12, 4))
+
+        # ── Send to Tray button ────────────────────
+        self.tray_main_btn = tk.Button(self.main_page,
+            text='→  Send to tray',
+            bg=pal['BTN_TRAY'], fg=pal['GRY'],
+            activebackground=pal['BDR'], activeforeground=pal['FG'],
+            font=('Segoe UI', 8), bd=0, pady=6,
+            cursor='hand2', relief='flat',
+            command=self._minimize_to_tray)
+        self.tray_main_btn.pack(fill='x', padx=14, pady=(0, 10))
+        if not TRAY_AVAILABLE:
+            self.tray_main_btn.config(state='disabled',
+                text='→  Send to tray  (pip install pystray pillow)')
 
         # ── Mini log ───────────────────────────────
         self.log = tk.Text(self.main_page, height=4, bg=pal['BG'], fg=pal['DIM'],
@@ -401,21 +426,44 @@ class App:
         pal = self.p()
         self.settings_page = tk.Frame(self.content, bg=pal['BG'])
 
-        self.settings_canvas = tk.Canvas(self.settings_page, bg=pal['BG'],
+        # ── Fixed top bar with Guide button ────────
+        top_bar = tk.Frame(self.settings_page, bg=pal['S1'])
+        top_bar.pack(fill='x')
+        self.settings_top_bar = top_bar
+
+        tk.Label(top_bar, text='Settings', bg=pal['S1'], fg=pal['GRY'],
+                 font=('Segoe UI', 8, 'bold')).pack(side='left', padx=(14, 0), pady=8)
+
+        self.guide_btn = tk.Button(top_bar, text='📖  Open Guide',
+            bg=pal['S2'], fg=pal['ACC'],
+            activebackground=pal['BDR'], activeforeground=pal['FG'],
+            font=('Segoe UI', 8), bd=0, padx=10, pady=5,
+            cursor='hand2', relief='flat',
+            command=self._open_guide)
+        self.guide_btn.pack(side='right', padx=10, pady=6)
+
+        self.settings_top_sep = tk.Frame(self.settings_page, bg=pal['BDR'], height=1)
+        self.settings_top_sep.pack(fill='x')
+
+        # ── Scrollable content area ─────────────────
+        scroll_frame = tk.Frame(self.settings_page, bg=pal['BG'])
+        scroll_frame.pack(fill='both', expand=True)
+
+        self.settings_canvas = tk.Canvas(scroll_frame, bg=pal['BG'],
                                           highlightthickness=0)
-        sb = ttk.Scrollbar(self.settings_page, orient='vertical',
+        sb = ttk.Scrollbar(scroll_frame, orient='vertical',
                            command=self.settings_canvas.yview)
         self.settings_inner = tk.Frame(self.settings_canvas, bg=pal['BG'])
 
         self.settings_inner.bind('<Configure>',
             lambda e: self.settings_canvas.configure(
                 scrollregion=self.settings_canvas.bbox('all')))
-        self._settings_win = self.settings_canvas.create_window(
+        self._settings_win_id = self.settings_canvas.create_window(
             (0, 0), window=self.settings_inner, anchor='nw')
         self.settings_canvas.configure(yscrollcommand=sb.set)
         self.settings_canvas.bind('<Configure>',
             lambda e: self.settings_canvas.itemconfig(
-                self._settings_win, width=e.width))
+                self._settings_win_id, width=e.width))
         self.settings_canvas.bind('<MouseWheel>',
             lambda e: self.settings_canvas.yview_scroll(
                 -1 * (e.delta // 120), 'units'))
@@ -431,11 +479,13 @@ class App:
         for w in inner.winfo_children():
             w.destroy()
 
+        # ── Helpers ─────────────────────────────────
         def section(title):
-            hdr = tk.Frame(inner, bg=pal['S1'])
-            hdr.pack(fill='x', padx=12, pady=(10, 0))
-            tk.Label(hdr, text=title, bg=pal['S1'], fg=pal['GRY'],
-                     font=('Segoe UI', 8, 'bold')).pack(side='left', padx=10, pady=6)
+            hf = tk.Frame(inner, bg=pal['S1'])
+            hf.pack(fill='x', padx=12, pady=(10, 0))
+            tk.Label(hf, text=title, bg=pal['S1'], fg=pal['GRY'],
+                     font=('Segoe UI', 8, 'bold')).pack(
+                         side='left', padx=10, pady=6)
             tk.Frame(inner, bg=pal['BDR'], height=1).pack(fill='x', padx=12)
             body = tk.Frame(inner, bg=pal['S2'])
             body.pack(fill='x', padx=12, pady=(0, 4))
@@ -449,116 +499,133 @@ class App:
             build_fn(r)
             return r
 
-        def radio(parent, text, var, value, cmd):
+        def rbtn(parent, text, var, value, cmd):
             tk.Radiobutton(parent, text=text, variable=var, value=value,
                 bg=pal['S2'], fg=pal['FG'], selectcolor=pal['BDR'],
                 activebackground=pal['S2'], activeforeground=pal['FG'],
                 font=('Segoe UI', 8), command=cmd).pack(side='left', padx=(0, 8))
 
-        def check(parent, text, var, cmd):
+        def chk(parent, text, var, cmd):
             tk.Checkbutton(parent, text=text, variable=var,
                 bg=pal['S2'], fg=pal['FG'], selectcolor=pal['BDR'],
                 activebackground=pal['S2'], activeforeground=pal['FG'],
                 font=('Segoe UI', 8), command=cmd).pack(side='left')
 
-        def scale_badge(parent, var, fmt, from_, to, res, cmd):
+        def slider_row(parent, var, fmt, from_, to, res, cmd):
             badge = tk.Label(parent, text=fmt(var.get()),
-                bg=pal['S2'], fg=pal['ACC'], font=('Segoe UI', 8, 'bold'), width=6)
+                bg=pal['S2'], fg=pal['ACC'],
+                font=('Segoe UI', 8, 'bold'), width=6)
             badge.pack(side='right')
-            def _on(val, b=badge, f=fmt, c=cmd):
-                b.config(text=f(float(val)))
-                c(float(val))
-            tk.Scale(parent, from_=from_, to=to, resolution=res, orient='horizontal',
-                variable=var, bg=pal['S2'], fg=pal['FG'],
-                troughcolor=pal['BDR'], highlightthickness=0, bd=0,
-                sliderrelief='flat', showvalue=False,
-                command=_on).pack(fill='x', side='left', expand=True)
-            return badge
+            def _cb(val, b=badge, f=fmt, c=cmd):
+                b.config(text=f(float(val))); c(float(val))
+            tk.Scale(parent, from_=from_, to=to, resolution=res,
+                orient='horizontal', variable=var,
+                bg=pal['S2'], fg=pal['FG'], troughcolor=pal['BDR'],
+                highlightthickness=0, bd=0, sliderrelief='flat',
+                showvalue=False, command=_cb
+                ).pack(fill='x', side='left', expand=True)
 
-        # ── APPEARANCE ───────────────────────────
+        # ── APPEARANCE ────────────────────────────
         ap = section('APPEARANCE')
         self._dark_var = tk.BooleanVar(value=self.settings.get('dark_mode', True))
-        def build_theme(parent):
-            radio(parent, 'Dark',  self._dark_var, True,  self._on_dark_mode_change)
-            radio(parent, 'Light', self._dark_var, False, self._on_dark_mode_change)
+        def build_theme(r):
+            rbtn(r, 'Dark',  self._dark_var, True,  self._on_dark_mode_change)
+            rbtn(r, 'Light', self._dark_var, False, self._on_dark_mode_change)
         row(ap, 'Theme', build_theme)
 
-        self._launch_tray_var = tk.BooleanVar(value=self.settings.get('launch_to_tray', False))
-        def build_tray_startup(parent):
+        self._launch_tray_var = tk.BooleanVar(
+            value=self.settings.get('launch_to_tray', False))
+        def build_tray_start(r):
             state = 'normal' if TRAY_AVAILABLE else 'disabled'
-            tk.Checkbutton(parent, text='Launch to tray on startup',
-                variable=self._launch_tray_var, bg=pal['S2'], fg=pal['FG'],
-                selectcolor=pal['BDR'], activebackground=pal['S2'],
-                font=('Segoe UI', 8), state=state,
-                command=self._on_launch_tray_change).pack(side='left')
+            chk_w = tk.Checkbutton(r,
+                text='Launch to tray on startup',
+                variable=self._launch_tray_var,
+                bg=pal['S2'], fg=pal['FG'], selectcolor=pal['BDR'],
+                activebackground=pal['S2'], font=('Segoe UI', 8),
+                state=state, command=self._on_launch_tray_change)
+            chk_w.pack(side='left')
             if not TRAY_AVAILABLE:
-                tk.Label(parent, text='(pip install pystray pillow)',
-                    bg=pal['S2'], fg=pal['DIM'], font=('Segoe UI', 7)).pack(side='left', padx=(6, 0))
-        row(ap, 'System tray', build_tray_startup)
+                tk.Label(r, text='(pip install pystray pillow)',
+                    bg=pal['S2'], fg=pal['DIM'],
+                    font=('Segoe UI', 7)).pack(side='left', padx=(6, 0))
+        row(ap, 'System tray', build_tray_start)
 
         # ── MAIN PAGE WIDGETS ─────────────────────
         wp = section('MAIN PAGE WIDGETS')
-        self._show_baseline_var  = tk.BooleanVar(value=self.settings.get('show_baseline_label', True))
-        self._show_threshold_var = tk.BooleanVar(value=self.settings.get('show_threshold_label', True))
-        self._show_log_var       = tk.BooleanVar(value=self.settings.get('show_log', True))
-        self._show_peak_var      = tk.BooleanVar(value=self.settings.get('show_peak_hold', False))
+        self._show_baseline_var  = tk.BooleanVar(
+            value=self.settings.get('show_baseline_label', True))
+        self._show_threshold_var = tk.BooleanVar(
+            value=self.settings.get('show_threshold_label', True))
+        self._show_log_var       = tk.BooleanVar(
+            value=self.settings.get('show_log', True))
+        self._show_peak_var      = tk.BooleanVar(
+            value=self.settings.get('show_peak_hold', False))
         for label, var, key in [
-            ('Baseline info label',   self._show_baseline_var,  'show_baseline_label'),
-            ('Threshold info label',  self._show_threshold_var, 'show_threshold_label'),
-            ('Mini log',              self._show_log_var,       'show_log'),
-            ('Peak hold indicator',   self._show_peak_var,      'show_peak_hold'),
+            ('Baseline info label',  self._show_baseline_var,  'show_baseline_label'),
+            ('Threshold info label', self._show_threshold_var, 'show_threshold_label'),
+            ('Mini log',             self._show_log_var,       'show_log'),
+            ('Peak hold indicator',  self._show_peak_var,      'show_peak_hold'),
         ]:
-            def build_check(parent, v=var, k=key):
-                check(parent, '', v, lambda vv=v, kk=k: self._on_widget_toggle(vv, kk))
-            row(wp, label, build_check)
+            def _build(r, v=var, k=key):
+                chk(r, '', v, lambda vv=v, kk=k: self._on_widget_toggle(vv, kk))
+            row(wp, label, _build)
 
         # ── MONITORING BEHAVIOR ───────────────────
-        mb_sec = section('MONITORING BEHAVIOR')
-        self._recovery_var = tk.DoubleVar(value=self.settings.get('recovery_sec', 2.0))
-        row(mb_sec, 'Recovery time',
-            lambda parent: scale_badge(parent, self._recovery_var,
-                lambda v: f'{v:.1f} s', 0.5, 10.0, 0.5, self._on_recovery_change))
+        mb_s = section('MONITORING BEHAVIOR')
+        self._recovery_var = tk.DoubleVar(
+            value=self.settings.get('recovery_sec', 2.0))
+        row(mb_s, 'Recovery time',
+            lambda r: slider_row(r, self._recovery_var,
+                lambda v: f'{v:.1f} s', 0.5, 10.0, 0.5,
+                self._on_recovery_change))
 
-        self._peak_dur_var = tk.DoubleVar(value=self.settings.get('peak_hold_sec', 2.0))
-        row(mb_sec, 'Peak hold duration',
-            lambda parent: scale_badge(parent, self._peak_dur_var,
-                lambda v: f'{v:.1f} s', 0.5, 5.0, 0.5, self._on_peak_dur_change))
+        self._peak_dur_var = tk.DoubleVar(
+            value=self.settings.get('peak_hold_sec', 2.0))
+        row(mb_s, 'Peak hold duration',
+            lambda r: slider_row(r, self._peak_dur_var,
+                lambda v: f'{v:.1f} s', 0.5, 5.0, 0.5,
+                self._on_peak_dur_change))
 
         # ── AUDIO ENGINE ──────────────────────────
         ae = section('AUDIO ENGINE')
-        self._audio_mode_var = tk.StringVar(value=self.settings.get('audio_mode', 'standard'))
-        def build_audio_mode(parent):
-            f = tk.Frame(parent, bg=pal['S2'])
+        self._audio_mode_var = tk.StringVar(
+            value=self.settings.get('audio_mode', 'standard'))
+        def build_audio_mode(r):
+            f = tk.Frame(r, bg=pal['S2'])
             f.pack(side='left')
-            for val, lbl in [('standard', 'Standard (MME)'),
-                              ('wasapi_shared', 'WASAPI shared'),
+            for val, lbl in [('standard',         'Standard (MME)'),
+                              ('wasapi_shared',    'WASAPI shared'),
                               ('wasapi_exclusive', 'WASAPI exclusive')]:
-                tk.Radiobutton(f, text=lbl, variable=self._audio_mode_var, value=val,
-                    bg=pal['S2'], fg=pal['FG'], selectcolor=pal['BDR'],
-                    activebackground=pal['S2'], font=('Segoe UI', 8),
+                tk.Radiobutton(f, text=lbl, variable=self._audio_mode_var,
+                    value=val, bg=pal['S2'], fg=pal['FG'],
+                    selectcolor=pal['BDR'], activebackground=pal['S2'],
+                    font=('Segoe UI', 8),
                     command=self._on_audio_mode_change).pack(anchor='w', pady=1)
         row(ae, 'Audio mode', build_audio_mode)
 
-        self._output_mode_var = tk.StringVar(value=self.settings.get('output_mode', 'gate'))
-        def build_output_mode(parent):
-            f = tk.Frame(parent, bg=pal['S2'])
+        self._output_mode_var = tk.StringVar(
+            value=self.settings.get('output_mode', 'gate'))
+        def build_output_mode(r):
+            f = tk.Frame(r, bg=pal['S2'])
             f.pack(side='left')
-            tk.Radiobutton(f, text='Noise gate (mute completely)',
+            tk.Radiobutton(f, text='Noise gate  (mute completely)',
                 variable=self._output_mode_var, value='gate',
                 bg=pal['S2'], fg=pal['FG'], selectcolor=pal['BDR'],
                 activebackground=pal['S2'], font=('Segoe UI', 8),
                 command=self._on_output_mode_change).pack(anchor='w', pady=1)
-            tk.Radiobutton(f, text='Compressor (reduce volume)',
+            tk.Radiobutton(f, text='Compressor  (reduce volume)',
                 variable=self._output_mode_var, value='compressor',
                 bg=pal['S2'], fg=pal['FG'], selectcolor=pal['BDR'],
                 activebackground=pal['S2'], font=('Segoe UI', 8),
                 command=self._on_output_mode_change).pack(anchor='w', pady=1)
         row(ae, 'Output mode', build_output_mode)
 
-        self._comp_var = tk.IntVar(value=self.settings.get('compressor_reduction', 80))
+        self._comp_var = tk.IntVar(
+            value=self.settings.get('compressor_reduction', 80))
         self._comp_row = row(ae, 'Reduction amount',
-            lambda parent: scale_badge(parent, self._comp_var,
-                lambda v: f'{int(v)} %', 0, 100, 1, self._on_comp_change))
+            lambda r: slider_row(r, self._comp_var,
+                lambda v: f'{int(v)} %', 0, 100, 1,
+                self._on_comp_change))
         self._update_comp_row_visibility()
 
         tk.Frame(inner, bg=pal['BG'], height=16).pack()
@@ -569,6 +636,16 @@ class App:
             self._comp_row.pack(fill='x', padx=10, pady=5)
         else:
             self._comp_row.pack_forget()
+
+    # ──────────────────────────────────────────────
+    # Guide
+    # ──────────────────────────────────────────────
+    def _open_guide(self):
+        if os.path.exists(GUIDE_PATH):
+            os.startfile(GUIDE_PATH)
+        else:
+            mb.showinfo("Guide not found",
+                f"GUIDE.txt was not found.\nExpected location:\n{GUIDE_PATH}")
 
     # ──────────────────────────────────────────────
     # Page toggling
@@ -601,14 +678,14 @@ class App:
         self.dot.config(bg=pal['S1'], fg=pal['DIM'])
         self.status_lbl.config(bg=pal['S1'], fg=pal['DIM'])
         self.gear_btn.config(bg=pal['S1'], fg=pal['GRY'],
-                             activebackground=pal['S2'], activeforeground=pal['FG'])
-        if self.tray_btn:
-            self.tray_btn.config(bg=pal['S1'], fg=pal['GRY'],
-                                 activebackground=pal['S2'], activeforeground=pal['FG'])
+                             activebackground=pal['S2'])
+        if self.tray_hdr_btn:
+            self.tray_hdr_btn.config(bg=pal['S1'], fg=pal['GRY'],
+                                     activebackground=pal['S2'])
         self.hdr_sep.config(bg=pal['BDR'])
         self.content.config(bg=pal['BG'])
 
-        # Main page backgrounds
+        # Main page
         self.main_page.config(bg=pal['BG'])
         self.dev_frame.config(bg=pal['BG'])
         for f in self._dev_cell_frames + self._dev_top_frames:
@@ -636,16 +713,38 @@ class App:
         self.slider_frame.config(bg=pal['BG'])
         self.sl_head_lbl.config(bg=pal['BG'], fg=pal['GRY'])
         self.sl_badge.config(bg=pal['BG'], fg=pal['RED'])
-        self.thresh_scale.config(bg=pal['BG'], fg=pal['FG'], troughcolor=pal['S2'])
+        self.thresh_scale.config(bg=pal['BG'], fg=pal['FG'],
+                                  troughcolor=pal['S2'])
         self.slider_sep.config(bg=pal['BDR'])
 
+        # Start/Stop button colors depend on current state
+        if self.state == IDLE:
+            self.btn.config(bg=pal['BTN_START'], fg=pal['FG'],
+                            activebackground=pal['BTN_START_A'])
+        else:
+            self.btn.config(bg=pal['BTN_STOP'], fg=pal['FG'],
+                            activebackground=pal['BTN_STOP_A'])
+
+        self.tray_main_btn.config(bg=pal['BTN_TRAY'], fg=pal['GRY'],
+                                   activebackground=pal['BDR'],
+                                   activeforeground=pal['FG'])
+
         self.log.config(bg=pal['BG'], fg=pal['DIM'])
-        for tag, ck in [('cal','ACC'),('start','GRN'),('warn','YEL'),('recover','YEL')]:
+        for tag, ck in [('cal','ACC'),('start','GRN'),
+                         ('warn','YEL'),('recover','YEL')]:
             self.log.tag_config(tag, foreground=pal[ck])
 
         # Settings page
         if hasattr(self, 'settings_canvas'):
             self.settings_page.config(bg=pal['BG'])
+            self.settings_top_bar.config(bg=pal['S1'])
+            for w in self.settings_top_bar.winfo_children():
+                if isinstance(w, tk.Label):
+                    w.config(bg=pal['S1'], fg=pal['GRY'])
+                elif isinstance(w, tk.Button):
+                    w.config(bg=pal['S2'], fg=pal['ACC'],
+                             activebackground=pal['BDR'])
+            self.settings_top_sep.config(bg=pal['BDR'])
             self.settings_canvas.config(bg=pal['BG'])
             self.settings_inner.config(bg=pal['BG'])
             self._build_settings_content()
@@ -654,7 +753,6 @@ class App:
 
     def _apply_widget_visibility(self):
         s = self.settings
-        # Unpack all info children, then re-pack visible ones in order
         self.base_lbl_text.pack_forget()
         self.base_lbl.pack_forget()
         self.thresh_info.pack_forget()
@@ -739,12 +837,13 @@ class App:
         for i in range(segs):
             t = i / segs
             if t < 0.55:
-                r = int(40 + 215 * (t / 0.55)); g = 185
+                r2 = int(40 + 215 * (t / 0.55)); g2 = 185
             else:
-                r = 255; g = int(185 * max(0, 1 - (t - 0.55) / 0.45))
-            color = f'#{r:02x}{g:02x}1e'
+                r2 = 255; g2 = int(185 * max(0, 1 - (t - 0.55) / 0.45))
+            color = f'#{r2:02x}{g2:02x}1e'
             x1 = int(i * w / segs); x2 = int((i+1) * w / segs)
-            gid = self.canvas.create_rectangle(x1, 0, x2, h, fill=color, outline='')
+            gid = self.canvas.create_rectangle(x1, 0, x2, h,
+                                                fill=color, outline='')
             self._grad_ids.append(gid)
 
         self.canvas.tag_raise(self.mask_rect)
@@ -799,10 +898,11 @@ class App:
             wasapi_only = mode in ('wasapi_shared', 'wasapi_exclusive')
             in_list, out_list, in_map, out_map = get_devices(wasapi_only=wasapi_only)
         except Exception as e:
-            mb.showerror("Device error", f"Could not read audio devices:\n{e}"); return
+            mb.showerror("Device error",
+                f"Could not read audio devices:\n{e}"); return
 
         self.in_map = in_map; self.out_map = out_map
-        self.in_cb['values'] = in_list
+        self.in_cb['values']  = in_list
         self.out_cb['values'] = out_list
 
         saved_in  = self.settings.get('in_device', '')
@@ -813,20 +913,20 @@ class App:
         else:
             try:
                 def_in = sd.query_devices(kind='input')['name']
-                best_in = next((n for n in in_list if def_in in n),
-                               in_list[0] if in_list else '')
+                best = next((n for n in in_list if def_in in n),
+                            in_list[0] if in_list else '')
             except Exception:
-                best_in = in_list[0] if in_list else ''
-            self.in_var.set(best_in)
+                best = in_list[0] if in_list else ''
+            self.in_var.set(best)
 
         if saved_out and saved_out in out_list:
             self.out_var.set(saved_out)
         else:
-            best_out = next((n for n in out_list
-                             if any(k in n.lower()
-                                    for k in ('cable input', 'vb-audio virtual cable'))),
-                            out_list[0] if out_list else '')
-            self.out_var.set(best_out)
+            best = next((n for n in out_list
+                         if any(k in n.lower()
+                                for k in ('cable input', 'vb-audio virtual cable'))),
+                        out_list[0] if out_list else '')
+            self.out_var.set(best)
 
     # ──────────────────────────────────────────────
     # Log
@@ -859,7 +959,7 @@ class App:
         in_n = self.in_var.get(); out_n = self.out_var.get()
         if not in_n or not out_n:
             mb.showwarning("Selection missing",
-                           "Please select an input and output device."); return
+                "Please select an input and output device."); return
         try:
             mode = self.settings.get('audio_mode', 'standard')
             kw = dict(samplerate=SAMPLE_RATE, blocksize=BLOCK_SIZE,
@@ -872,7 +972,8 @@ class App:
                         exclusive=(mode == 'wasapi_exclusive'))
                 except AttributeError:
                     mb.showwarning("WASAPI",
-                        "WASAPI settings not supported. Falling back to standard mode.")
+                        "WASAPI not available on this system.\n"
+                        "Falling back to standard mode.")
             self.stream = sd.Stream(**kw)
             self.stream.start()
         except Exception as e:
@@ -884,7 +985,9 @@ class App:
         self._peak_pct = 0.0; self._peak_time = 0.0
         self.state = CALIBRATING
 
-        self.btn.config(text='⏹  Stop', bg='#b91c1c', activebackground='#cf2f2f')
+        pal = self.p()
+        self.btn.config(text='⏹  Stop',
+            bg=pal['BTN_STOP'], activebackground=pal['BTN_STOP_A'])
         self.in_cb.config(state='disabled')
         self.out_cb.config(state='disabled')
         self._set_status(CALIBRATING)
@@ -895,8 +998,10 @@ class App:
         self.state = IDLE
         if self.stream:
             self.stream.stop(); self.stream.close(); self.stream = None
+
+        pal = self.p()
         self.btn.config(text='▶  Start monitoring',
-                         bg='#1f6feb', activebackground='#388bfd')
+            bg=pal['BTN_START'], activebackground=pal['BTN_START_A'])
         self.in_cb.config(state='readonly')
         self.out_cb.config(state='readonly')
         self._set_status(IDLE)
@@ -1016,10 +1121,10 @@ class App:
     # System tray
     # ──────────────────────────────────────────────
     def _tray_color(self):
-        if self.state == MONITORING:  return (63, 185, 80, 255)    # green
-        if self.state == TRIGGERED:   return (210, 153, 34, 255)   # yellow
-        if self.state == CALIBRATING: return (88, 166, 255, 255)   # blue
-        return (72, 79, 88, 255)                                    # gray
+        if self.state == MONITORING:  return (63, 185, 80, 255)
+        if self.state == TRIGGERED:   return (210, 153, 34, 255)
+        if self.state == CALIBRATING: return (88, 166, 255, 255)
+        return (72, 79, 88, 255)
 
     def _make_tray_image(self):
         img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
@@ -1036,7 +1141,8 @@ class App:
         )
         self._tray_icon = pystray.Icon(
             'mic-monitor', self._make_tray_image(), 'Mic Monitor', menu)
-        threading.Thread(target=self._tray_icon.run, daemon=True).start()
+        # run_detached() starts the tray loop in a background thread (pystray ≥ 0.19)
+        self._tray_icon.run_detached()
 
     def _stop_tray(self):
         if self._tray_icon:
@@ -1056,7 +1162,7 @@ class App:
                 "  pip install pystray pillow")
             return
         self._start_tray()
-        self.root.withdraw()
+        self.root.after(100, self.root.withdraw)
 
     def _tray_show(self, icon=None, item=None):
         self.root.after(0, self._restore_window)

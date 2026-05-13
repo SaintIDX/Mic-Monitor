@@ -16,6 +16,7 @@ env/
 # Local settings (device names, preferences — no secrets, but local only)
 settings.json
 lite_settings.json
+novb_settings.json
 
 # OS
 .DS_Store

@@ -2,6 +2,26 @@
   MIC MONITOR v4.0 — Full Feature Guide
 ═══════════════════════════════════════════════════════════════
 
+WHICH VERSION TO USE
+─────────────────────
+  mic-monitor-v4-eng.py   Full GUI version with meter, settings,
+                          system tray. Requires VB-Audio Virtual
+                          Cable to route audio to other apps.
+
+  mic-monitor-lite.py     Tray-only automatic version (~220 lines).
+                          Requires VB-Audio Virtual Cable.
+
+  mic-monitor-novb.py     No VB-Audio needed. Mutes the Windows
+                          microphone endpoint directly via the
+                          system API (pycaw). All apps (Discord,
+                          Teams, OBS) see the muted state without
+                          any routing changes.
+                          Extra requirement:
+                            pip install pycaw comtypes
+                          Trade-off: no audio pass-through — the
+                          mic is either fully live or system-muted.
+
+
 WHAT IT DOES
 ────────────
 Mic Monitor sits between your real microphone and other
